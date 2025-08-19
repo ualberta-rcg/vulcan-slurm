@@ -1,0 +1,43 @@
+name: Build and Push Docker Images
+
+on:
+  pull_request:
+    branches:
+      - slurmctld
+      - slurmdbd
+      - slurmrestd
+      
+jobs:
+  build-scan-remediate-push:
+    name: Build and Push Docker Images for Each Branch
+    runs-on: ubuntu-latest
+
+    env:
+      DOCKER_REPO: ${{ vars.CONTAINER_IMAGE }}
+      BRANCH: ${{ github.base_ref }}   
+
+    steps:
+      - name: 🛠️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔍 Verify Directory for Branch
+        run: |
+          if [ ! -d "./${BRANCH}" ]; then
+            echo "Directory ./${BRANCH} does not exist for branch ${BRANCH}."
+            exit 1
+          fi        
+
+      - name: 📂 Copy .deb Files to Branch Directory
+        run: |
+          cp -v slurm-debs/*25.05.1-1*debian12.deb ./${BRANCH}/   
+
+      - name: 🐳 Build Docker Image
+        run: |
+          cd ${BRANCH}
+          docker build -t $DOCKER_REPO:${BRANCH} .
+
+      - name: 🚀 Push Docker Image
+        run: |
+          cd ${BRANCH}      
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
+          docker push $DOCKER_REPO:${BRANCH}
