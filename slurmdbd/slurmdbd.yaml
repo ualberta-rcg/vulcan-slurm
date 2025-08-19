@@ -1,0 +1,81 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: slurmdbd-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.16.254.40-172.16.254.40
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: slurmdbd-advertisement
+  namespace: metallb-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: slurmdbd
+  namespace: slurm
+spec:
+  selector:
+    matchLabels:
+      app: slurmdbd
+  template:
+    metadata:
+      labels:
+        app: slurmdbd
+    spec:
+      containers:
+      - name: slurmdbd
+        image: rkhoja/slurm:slurmdbd
+        imagePullPolicy: Always
+        volumeMounts:
+        - name: nfs-munge-key
+          mountPath: /etc/munge/.secret/
+        - name: slurm-config
+          mountPath: /etc/slurm
+            #        command: ["/bin/bash", "-c"]
+            #        args:
+            #          - |
+            #            tail -f /dev/null
+      volumes:
+      - name: slurm-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/slurm
+      - name: nfs-munge-key
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/munge
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slurmdbd-service
+  namespace: slurm
+  labels:
+    app: slurmdbd-service
+spec:
+  allocateLoadBalancerNodePorts: true
+  selector:
+    app: slurmdbd
+  ports:
+  - name: slurmdbd
+    port: 6819
+    protocol: TCP
+    targetPort: 6819
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 hours
+  type: LoadBalancer
+  loadBalancerIP: 172.16.254.40
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack

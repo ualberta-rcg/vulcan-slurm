@@ -1,0 +1,86 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: slurmrestd-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.16.254.44-172.16.254.44
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: slurmrestd-advertisement
+  namespace: metallb-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: slurmrestd
+  namespace: slurm
+spec:
+  selector:
+    matchLabels:
+      app: slurmrestd
+  template:
+    metadata:
+      labels:
+        app: slurmrestd
+    spec:
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "slurmrestd"
+      containers:
+      - name: slurmrestd
+        image: rkhoja/slurm:slurmrestd
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 6820
+        volumeMounts:
+        - name: nfs-munge-key
+          mountPath: /etc/munge/.secret/
+        - name: slurm-config
+          mountPath: /etc/slurm
+#        command: ["/bin/bash", "-c"]
+#        args:
+#          - |
+#            tail -f /dev/null
+      volumes:
+      - name: nfs-munge-key
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/munge
+      - name: slurm-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/slurm
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slurmrestd-service
+  namespace: slurm
+  labels:
+    app: slurmrestd-service
+spec:
+  selector:
+    app: slurmrestd
+  ports:
+  - name: slurmrestd
+    port: 6820
+    protocol: TCP
+    targetPort: 6820
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 hours
+  type: LoadBalancer
+  loadBalancerIP: 172.16.254.44
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack

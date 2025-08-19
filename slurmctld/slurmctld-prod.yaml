@@ -1,0 +1,312 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: slurmctld-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.16.254.41-172.16.254.43
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: slurmctld-advertisement
+  namespace: metallb-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slurmctld-1
+  namespace: slurm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: slurmctld
+      instance: "1"
+  template:
+    metadata:
+      labels:
+        app: slurmctld
+        instance: "1"
+    spec:
+      hostname: slurmctld-1
+      # Try scheduling this Pod on a different node from the other slurmctld pods:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: slurmctld
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: slurmctld
+        image: rkhoja/slurm:slurmctld  # Adjust image as needed
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 6817
+        volumeMounts:
+        - name: nfs-munge-key
+          mountPath: /etc/munge/.secret/
+        - name: slurm-config
+          mountPath: /etc/slurm
+        - name: slurmctld-state
+          mountPath: /var/spool/slurmctld
+        - name: sssd-config
+          mountPath: /etc/sssd
+        # Uncomment if you need a debug hold:
+        # command: ["/bin/bash", "-c"]
+        # args:
+        #   - |
+        #     tail -f /dev/null
+      volumes:
+      - name: nfs-munge-key
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/munge
+      - name: slurm-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/slurm
+      - name: slurmctld-state
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/var/spool/slurmctld/
+      - name: sssd-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/sssd
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "slurmctld-1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slurmctld-service-1
+  namespace: slurm
+  labels:
+    app: slurmctld
+    instance: "1"
+spec:
+  selector:
+    app: slurmctld
+    instance: "1"
+  ports:
+  - name: slurmctld
+    port: 6817
+    protocol: TCP
+    targetPort: 6817
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+  type: LoadBalancer
+  loadBalancerIP: 172.16.254.41
+  externalTrafficPolicy: Local
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  loadBalancerSourceRanges:
+    - 172.16.254.0/24
+    - 10.42.0.0/16
+    - 10.43.0.0/16
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slurmctld-2
+  namespace: slurm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: slurmctld
+      instance: "2"
+  template:
+    metadata:
+      labels:
+        app: slurmctld
+        instance: "2"
+    spec:
+      hostname: slurmctld-2
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: slurmctld
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: slurmctld
+        image: rkhoja/slurm:slurmctld
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 6817
+        volumeMounts:
+        - name: nfs-munge-key
+          mountPath: /etc/munge/.secret/
+        - name: slurm-config
+          mountPath: /etc/slurm
+        - name: slurmctld-state
+          mountPath: /var/spool/slurmctld
+        - name: sssd-config
+          mountPath: /etc/sssd
+      volumes:
+      - name: nfs-munge-key
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/munge
+      - name: slurm-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/slurm
+      - name: slurmctld-state
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/var/spool/slurmctld/
+      - name: sssd-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/sssd
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "slurmctld-2"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slurmctld-service-2
+  namespace: slurm
+  labels:
+    app: slurmctld
+    instance: "2"
+spec:
+  selector:
+    app: slurmctld
+    instance: "2"
+  ports:
+  - name: slurmctld
+    port: 6817
+    protocol: TCP
+    targetPort: 6817
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+  type: LoadBalancer
+  loadBalancerIP: 172.16.254.42
+  externalTrafficPolicy: Local
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  loadBalancerSourceRanges:
+    - 172.16.254.0/24
+    - 10.42.0.0/16
+    - 10.43.0.0/16
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slurmctld-3
+  namespace: slurm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: slurmctld
+      instance: "3"
+  template:
+    metadata:
+      labels:
+        app: slurmctld
+        instance: "3"
+    spec:
+      hostname: slurmctld-3
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: slurmctld
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: slurmctld
+        image: rkhoja/slurm:slurmctld
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 6817
+        volumeMounts:
+        - name: nfs-munge-key
+          mountPath: /etc/munge/.secret/
+        - name: slurm-config
+          mountPath: /etc/slurm
+        - name: slurmctld-state
+          mountPath: /var/spool/slurmctld
+        - name: sssd-config
+          mountPath: /etc/sssd
+      volumes:
+      - name: nfs-munge-key
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/munge
+      - name: slurm-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/slurm
+      - name: slurmctld-state
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/var/spool/slurmctld/
+      - name: sssd-config
+        nfs:
+          server: 172.16.254.10
+          path: /mnt/storage-1/slurm/etc/sssd
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "slurmctld-3"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slurmctld-service-3
+  namespace: slurm
+  labels:
+    app: slurmctld
+    instance: "3"
+spec:
+  selector:
+    app: slurmctld
+    instance: "3"
+  ports:
+  - name: slurmctld
+    port: 6817
+    protocol: TCP
+    targetPort: 6817
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+  type: LoadBalancer
+  loadBalancerIP: 172.16.254.43
+  externalTrafficPolicy: Local
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  loadBalancerSourceRanges:
+    - 172.16.254.0/24
+    - 10.42.0.0/16
+    - 10.43.0.0/16
