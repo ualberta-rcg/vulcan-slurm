@@ -12,7 +12,8 @@ on:
 
 jobs:
   build-debs:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04  # Host runner (required by GitHub Actions)
+    container: debian:bullseye-slim  # Build inside Debian Bullseye container
 
     outputs:
       version: ${{ steps.vars.outputs.version }}
@@ -83,7 +84,7 @@ jobs:
           version="${{ steps.vars.outputs.version }}"
           debver="$(echo "$version" | sed 's/^\([0-9]*\)-\([0-9]*\)-\([0-9]*\)-\([0-9]*\)$/\1.\2.\3-\4/')"
           debdir="$GITHUB_WORKSPACE/slurm-debs"
-          OS_CODENAME="u2404" 
+          OS_CODENAME="b11"  # Changed from u2404 to b11 (Debian Bullseye)
 
           echo "🔍 Inputs:"
           echo "  Raw version       = $version"
@@ -138,7 +139,7 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
-          OS_CODENAME="u2404" # Change to ${{ matrix.os_codename }} if using a matrix
+          OS_CODENAME="b11" # Change to ${{ matrix.os_codename }} if using a matrix
           DEST_DIR="$GITHUB_WORKSPACE/slurm-debs"
           mkdir -p "$DEST_DIR"
           
@@ -154,7 +155,7 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
-          OS_CODENAME="u2404" # Change to ${{ matrix.os_codename }} if using a matrix
+          OS_CODENAME="b11" # Change to ${{ matrix.os_codename }} if using a matrix
           
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
