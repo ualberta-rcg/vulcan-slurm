@@ -114,9 +114,12 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           apt-get update
+          echo "🔍 Checking available packages in Debian Bullseye..."
+          apt-cache policy devscripts equivs build-essential fakeroot debhelper curl jq git libpmix-dev libpmix2 libopenmpi-dev libopenmpi3 openmpi-bin
+          echo "📦 Installing build dependencies..."
           apt-get install -y \
             devscripts equivs build-essential fakeroot debhelper curl jq git \
-            libpmix-dev libpmix2 libopenmpi-dev libopenmpi3 openmpi-bin libnvidia-ml-dev
+            libpmix-dev libpmix2 libopenmpi-dev libopenmpi3 openmpi-bin
 
       - name: 📥 Download and Extract Slurm Source
         if: steps.version-check.outputs.skip_build == 'false'
@@ -143,7 +146,7 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
-          OS_CODENAME="b11" # Change to ${{ matrix.os_codename }} if using a matrix
+          OS_CODENAME="b11" # Debian Bullseye
           DEST_DIR="$GITHUB_WORKSPACE/slurm-debs"
           mkdir -p "$DEST_DIR"
           
@@ -159,7 +162,7 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
-          OS_CODENAME="b11" # Change to ${{ matrix.os_codename }} if using a matrix
+          OS_CODENAME="b11" # Debian Bullseye
           
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -169,7 +172,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Ubuntu ${OS_CODENAME}"
+            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Debian Bullseye (${OS_CODENAME})"
             git push
           fi
         env:
