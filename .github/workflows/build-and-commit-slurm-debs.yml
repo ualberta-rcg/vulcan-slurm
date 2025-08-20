@@ -8,7 +8,7 @@ on:
         required: false
         default: ''
   schedule:
-    - cron: '0 3 1 * *'  # Every month on the 1st at 03:00 UTC
+    - cron: '*/5 * * * *'  # Every 5 minutes for testing
 
 jobs:
   build-debs:
@@ -30,12 +30,10 @@ jobs:
         run: |
           set -e # Exit on error
           
-          # Use the manual dispatch input first, then the repo variable as a fallback
-          VERSION_OVERRIDE="${{ github.event.inputs.SLURM_VERSION_OVERRIDE || vars.SLURM_VERSION_OVERRIDE }}"
-
-          if [ -n "$VERSION_OVERRIDE" ] && [ "$VERSION_OVERRIDE" != "0" ]; then
-            echo "✅ Using specified version override: $VERSION_OVERRIDE"
-            VERSION="$VERSION_OVERRIDE"
+          # Check if this is a manual dispatch with version override
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}" ]; then
+            echo "✅ Using manual dispatch version override: ${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}"
+            VERSION="${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}"
           else
             echo "🔍 No version override set. Detecting latest stable version..."
             
