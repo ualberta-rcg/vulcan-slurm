@@ -1,0 +1,3 @@
+[33mabc1e93[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m cron test
+[33m9e81ae6[m Add Slurm DEBs (v25-05-2-1) for Ubuntu u2404
+[33md01d25c[m Delete .github/workflows/build-slurm.yml
