@@ -14,14 +14,19 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build-and-commit-slurm-debs.yml',
-              ref: context.ref,
-              inputs: {}
-            });
-            console.log('DEB build workflow triggered successfully!');
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'build-and-commit-slurm-debs.yml',
+                ref: context.ref,
+                inputs: {}
+              });
+              console.log('✅ DEB build workflow triggered successfully!');
+            } catch (error) {
+              console.error('❌ Failed to trigger DEB build workflow:', error.message);
+              throw error;
+            }
 
   wait-for-debs:
     name: Wait for DEB Build to Complete
@@ -43,11 +48,16 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build-push-workflow.yml',
-              ref: context.ref,
-              inputs: {}
-            });
-            console.log('Docker build workflow triggered successfully!');
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'build-push-workflow.yml',
+                ref: context.ref,
+                inputs: {}
+              });
+              console.log('✅ Docker build workflow triggered successfully!');
+            } catch (error) {
+              console.error('❌ Failed to trigger Docker build workflow:', error.message);
+              throw error;
+            }
