@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DOCKER_REPO: ${{ vars.CONTAINER_IMAGE }}
+      DOCKER_REPO: ${{ vars.DOCKER_HUB_REPO }}
 
     steps:
       - name: 🛠️ Checkout Repository
