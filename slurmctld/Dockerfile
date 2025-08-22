@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y \
     libopenmpi3 \
     openmpi-bin \
     mailutils \
+    curl \
     munge \
     sssd \
     sssd-tools \
