@@ -52,7 +52,7 @@ jobs:
 
           apt-get update
 
-          apt=get install jq curl -y
+          apt-get install jq curl -y
           
           # Check if this is a manual dispatch with version override
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}" ]; then
