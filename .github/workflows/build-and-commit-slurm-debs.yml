@@ -11,15 +11,11 @@ on:
     - cron: '0 0 * * 0'
 
 jobs:
-  build-debs:
+  build-and-commit-debs:
     runs-on: ubuntu-22.04  # Host runner (required by GitHub Actions)
     container: 
       image: debian:bullseye-slim
       options: --user root  # Run as root for build process
-
-    outputs:
-      version: ${{ steps.vars.outputs.version }}
-      skip_build: ${{ steps.version-check.outputs.skip_build }}
 
     steps:
       - name: 🐛 Debug Information
@@ -39,19 +35,12 @@ jobs:
           echo "User: $(whoami)"
           echo "UID: $(id -u)"
           
-      - name: 📦 Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          # Fetch all history for all branches and tags
-          fetch-depth: 0
-
       - name: 🎯 Determine Target Slurm Version
         id: vars
         run: |
           set -e # Exit on error
 
           apt-get update
-
           apt-get install jq curl -y
           
           # Check if this is a manual dispatch with version override
@@ -91,26 +80,28 @@ jobs:
         run: |
           version="${{ steps.vars.outputs.version }}"
           debver="$(echo "$version" | sed 's/^\([0-9]*\)-\([0-9]*\)-\([0-9]*\)-\([0-9]*\)$/\1.\2.\3-\4/')"
-          debdir="$GITHUB_WORKSPACE/slurm-debs"
           OS_CODENAME="b11"  
 
           echo "🔍 Inputs:"
           echo "  Raw version       = $version"
           echo "  Debian version    = $debver"
-          echo "  Search directory  = $debdir"
           echo "  Search pattern    = *_${debver}_*_${OS_CODENAME}.deb"
 
-          mkdir -p "$debdir"
-          echo "📂 Directory contents before search:"
-          ls -l "$debdir" || true
-
-          count=$(find "$debdir" -type f -name "*_${debver}_*_${OS_CODENAME}.deb" | wc -l || true)
-
-          if [ "$count" -gt 0 ]; then
-            echo "✅ DEBs for Slurm $version already exist. Skipping build."
-            echo "skip_build=true" >> $GITHUB_OUTPUT
+          # Clone the repo to check for existing DEBs
+          git clone https://github.com/${{ github.repository }}.git /tmp/repo
+          cd /tmp/repo
+          
+          if [ -d "slurm-debs" ]; then
+            count=$(find "slurm-debs" -type f -name "*_${debver}_*_${OS_CODENAME}.deb" | wc -l || true)
+            if [ "$count" -gt 0 ]; then
+              echo "✅ DEBs for Slurm $version already exist. Skipping build."
+              echo "skip_build=true" >> $GITHUB_OUTPUT
+            else
+              echo "🚧 No existing DEBs for Slurm $version. Proceeding with build."
+              echo "skip_build=false" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "🚧 No existing DEBs for Slurm $version. Proceeding with build."
+            echo "🚧 No slurm-debs directory found. Proceeding with build."
             echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
           
@@ -151,7 +142,7 @@ jobs:
         run: |
           set -e
           OS_CODENAME="b11" # Debian Bullseye
-          DEST_DIR="$GITHUB_WORKSPACE/slurm-debs"
+          DEST_DIR="/tmp/repo/slurm-debs"
           mkdir -p "$DEST_DIR"
           
           # Move all .deb files from the parent directory
@@ -162,33 +153,26 @@ jobs:
           echo "Moved DEBs to $DEST_DIR"
           ls -l "$DEST_DIR"
 
-  # Git operations run on the host runner (outside container)
-  commit-debs:
-    needs: build-debs
-    runs-on: ubuntu-22.04
-    if: needs.build-debs.outputs.skip_build == 'false'
-    
-    steps:
-      - name: 📦 Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          
       - name: 📤 Commit and Push DEBs
+        if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
           OS_CODENAME="b11" # Debian Bullseye
           
+          cd /tmp/repo
+          
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
+          # Configure git to use the token for authentication
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          
           git add slurm-debs/
+          
           # Check if there are staged changes before committing
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Add Slurm DEBs (v${{ needs.build-debs.outputs.version }}) for Debian Bullseye (${OS_CODENAME})"
-            git push
+            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Debian Bullseye (${OS_CODENAME})"
+            git push origin HEAD:${{ github.ref_name }}
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
