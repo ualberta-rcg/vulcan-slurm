@@ -9,18 +9,16 @@ on:
         default: ''
   pull_request:
     branches:
-      - slurmctld
-      - slurmdbd
-      - slurmrestd
+      - main
+      - master
       
 jobs:
   build-scan-remediate-push:
-    name: Build and Push Docker Images for Each Branch
+    name: Build and Push All Slurm Services
     runs-on: ubuntu-latest
 
     env:
       DOCKER_REPO: ${{ vars.CONTAINER_IMAGE }}
-      BRANCH: ${{ github.base_ref }}   
 
     steps:
       - name: 🛠️ Checkout Repository
@@ -99,36 +97,56 @@ jobs:
           echo "   No DEB files found for Slurm version ${{ steps.vars.outputs.version }}"
           echo "   Please ensure DEB packages are built first using the build-and-commit-slurm-debs workflow"
 
-      - name: 🔍 Verify Directory for Branch
+      - name: 🐳 Build and Push slurmctld
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
-          if [ ! -d "./${BRANCH}" ]; then
-            echo "Directory ./${BRANCH} does not exist for branch ${BRANCH}."
-            exit 1
-          fi        
-
-      - name: 📂 Copy .deb Files to Branch Directory
-        if: steps.version-check.outputs.skip_build == 'false'
-        run: |
-          # Copy only DEB files that exactly match the Slurm version
-          echo "🔍 Looking for DEB files matching version: ${{ steps.vars.outputs.deb_version }}"
+          echo "🔨 Building slurmctld..."
           
-          # Find and copy only DEB files with the exact version
-          find slurm-debs -type f -name "*_${{ steps.vars.outputs.deb_version }}_*.deb" -exec cp -v {} ./${BRANCH}/ \;
+          # Copy DEB files for this service
+          cp -v slurm-debs/*${{ steps.vars.outputs.deb_version }}*.deb ./slurmctld/
           
-          # Verify what was copied
-          echo "📦 Copied DEB files:"
-          ls -la ./${BRANCH}/*.deb 2>/dev/null || echo "No DEB files found in ${BRANCH} directory"
-
-      - name: 🐳 Build Docker Image
-        if: steps.version-check.outputs.skip_build == 'false'
-        run: |
-          cd ${BRANCH}
-          docker build -t $DOCKER_REPO:${BRANCH} .
-
-      - name: 🚀 Push Docker Image
-        if: steps.version-check.outputs.skip_build == 'false'
-        run: |
-          cd ${BRANCH}      
+          # Build with dual tags
+          cd slurmctld
+          docker build -t $DOCKER_REPO:slurmctld .
+          docker build -t $DOCKER_REPO:slurmctld-${{ steps.vars.outputs.version }} .
+          
+          # Push both tags
           echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
-          docker push $DOCKER_REPO:${BRANCH}
+          docker push $DOCKER_REPO:slurmctld
+          docker push $DOCKER_REPO:slurmctld-${{ steps.vars.outputs.version }}
+
+      - name: 🐳 Build and Push slurmdbd
+        if: steps.version-check.outputs.skip_build == 'false'
+        run: |
+          echo "🔨 Building slurmdbd..."
+          
+          # Copy DEB files for this service
+          cp -v slurm-debs/*${{ steps.vars.outputs.deb_version }}*.deb ./slurmdbd/
+          
+          # Build with dual tags
+          cd slurmdbd
+          docker build -t $DOCKER_REPO:slurmdbd .
+          docker build -t $DOCKER_REPO:slurmdbd-${{ steps.vars.outputs.version }} .
+          
+          # Push both tags
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
+          docker push $DOCKER_REPO:slurmdbd
+          docker push $DOCKER_REPO:slurmdbd-${{ steps.vars.outputs.version }}
+
+      - name: 🐳 Build and Push slurmrestd
+        if: steps.version-check.outputs.skip_build == 'false'
+        run: |
+          echo "🔨 Building slurmrestd..."
+          
+          # Copy DEB files for this service
+          cp -v slurm-debs/*${{ steps.vars.outputs.deb_version }}*.deb ./slurmrestd/
+          
+          # Build with dual tags
+          cd slurmrestd
+          docker build -t $DOCKER_REPO:slurmrestd .
+          docker build -t $DOCKER_REPO:slurmrestd-${{ steps.vars.outputs.version }} .
+          
+          # Push both tags
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
+          docker push $DOCKER_REPO:slurmrestd
+          docker push $DOCKER_REPO:slurmrestd-${{ steps.vars.outputs.version }}
