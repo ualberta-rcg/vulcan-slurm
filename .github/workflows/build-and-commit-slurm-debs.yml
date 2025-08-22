@@ -80,19 +80,18 @@ jobs:
         run: |
           version="${{ steps.vars.outputs.version }}"
           debver="$(echo "$version" | sed 's/^\([0-9]*\)-\([0-9]*\)-\([0-9]*\)-\([0-9]*\)$/\1.\2.\3-\4/')"
-          OS_CODENAME="b11"  
 
           echo "🔍 Inputs:"
           echo "  Raw version       = $version"
           echo "  Debian version    = $debver"
-          echo "  Search pattern    = *_${debver}_*_${OS_CODENAME}.deb"
+          echo "  Search pattern    = *_${debver}_*.deb"
 
           # Clone the repo to check for existing DEBs
           git clone https://github.com/${{ github.repository }}.git /tmp/repo
           cd /tmp/repo
           
           if [ -d "slurm-debs" ]; then
-            count=$(find "slurm-debs" -type f -name "*_${debver}_*_${OS_CODENAME}.deb" | wc -l || true)
+            count=$(find "slurm-debs" -type f -name "*_${debver}_*.deb" | wc -l || true)
             if [ "$count" -gt 0 ]; then
               echo "✅ DEBs for Slurm $version already exist. Skipping build."
               echo "skip_build=true" >> $GITHUB_OUTPUT
@@ -141,14 +140,15 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
-          OS_CODENAME="b11" # Debian Bullseye
           DEST_DIR="/tmp/repo/slurm-debs"
           mkdir -p "$DEST_DIR"
           
-          # Move all .deb files from the parent directory
+          # Move all .deb files from the parent directory without renaming
+          # The packages already have proper names from debuild (including architecture)
           for deb in /tmp/slurm/*.deb; do
-            base=$(basename "$deb" .deb)
-            mv "$deb" "$DEST_DIR/${base}_${OS_CODENAME}.deb"
+            if [ -f "$deb" ]; then
+              mv "$deb" "$DEST_DIR/"
+            fi
           done
           echo "Moved DEBs to $DEST_DIR"
           ls -l "$DEST_DIR"
@@ -157,7 +157,6 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
-          OS_CODENAME="b11" # Debian Bullseye
           
           cd /tmp/repo
           
@@ -173,6 +172,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Debian Bullseye (${OS_CODENAME})"
+            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Debian"
             git push origin HEAD:${{ github.ref_name }}
           fi
