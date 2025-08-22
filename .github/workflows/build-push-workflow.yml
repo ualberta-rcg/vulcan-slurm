@@ -97,6 +97,11 @@ jobs:
           echo "   No DEB files found for Slurm version ${{ steps.vars.outputs.version }}"
           echo "   Please ensure DEB packages are built first using the build-and-commit-slurm-debs workflow"
 
+      - name: 🚀 Login to DockerHub
+        if: steps.version-check.outputs.skip_build == 'false'
+        run: |
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ vars.DOCKER_HUB_USER }}" --password-stdin
+
       - name: 🐳 Build and Push slurmctld
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
@@ -111,7 +116,6 @@ jobs:
           docker build -t $DOCKER_REPO:slurmctld-${{ steps.vars.outputs.version }} .
           
           # Push both tags
-          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
           docker push $DOCKER_REPO:slurmctld
           docker push $DOCKER_REPO:slurmctld-${{ steps.vars.outputs.version }}
 
@@ -129,7 +133,6 @@ jobs:
           docker build -t $DOCKER_REPO:slurmdbd-${{ steps.vars.outputs.version }} .
           
           # Push both tags
-          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
           docker push $DOCKER_REPO:slurmdbd
           docker push $DOCKER_REPO:slurmdbd-${{ steps.vars.outputs.version }}
 
@@ -147,6 +150,5 @@ jobs:
           docker build -t $DOCKER_REPO:slurmrestd-${{ steps.vars.outputs.version }} .
           
           # Push both tags
-          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
           docker push $DOCKER_REPO:slurmrestd
           docker push $DOCKER_REPO:slurmrestd-${{ steps.vars.outputs.version }}
