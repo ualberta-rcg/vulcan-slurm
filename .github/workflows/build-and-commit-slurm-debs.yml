@@ -158,8 +158,19 @@ jobs:
           echo "Moved DEBs to $DEST_DIR"
           ls -l "$DEST_DIR"
 
+  # Git operations run on the host runner (outside container)
+  commit-debs:
+    needs: build-debs
+    runs-on: ubuntu-22.04
+    if: needs.build-debs.outputs.skip_build == 'false'
+    
+    steps:
+      - name: 📦 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
       - name: 📤 Commit and Push DEBs
-        if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
           OS_CODENAME="b11" # Debian Bullseye
@@ -172,9 +183,8 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Debian Bullseye (${OS_CODENAME})"
+            git commit -m "Add Slurm DEBs (v${{ needs.build-debs.outputs.version }}) for Debian Bullseye (${OS_CODENAME})"
             git push
           fi
         env:
-          # Use a PAT if you have branch protection rules that GITHUB_TOKEN can't bypass
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
