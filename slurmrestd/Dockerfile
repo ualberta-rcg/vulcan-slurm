@@ -2,6 +2,14 @@
 FROM debian:bullseye-slim
 
 # =============================================================================
+# ENVIRONMENT VARIABLES - Standardized across all Slurm services
+# =============================================================================
+
+# Set default environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm
+
+# =============================================================================
 # LDAP CONFIGURATION - Standardized across Slurm services that require it
 # =============================================================================
 
@@ -32,6 +40,10 @@ RUN groupadd -g 971 slurmrest && useradd -u 971 -g 971 -m -s /bin/false slurmres
 RUN groupadd -g 2001 distgroup && \
     useradd -u 2001 -m -d /local/home/dist -g distgroup -s /bin/bash dist
 
+# =============================================================================
+# PACKAGE INSTALLATION - Standardized across all Slurm services
+# =============================================================================
+
 # Install Packages
 RUN apt-get update && apt-get install -y \
     libpmix-dev \
@@ -40,6 +52,7 @@ RUN apt-get update && apt-get install -y \
     libopenmpi3 \
     openmpi-bin \
     mailutils \
+    curl \
     munge \
     sssd \
     sssd-tools \
@@ -90,8 +103,6 @@ RUN cd /tmp && \
     else \
         echo "No .deb packages to install."; \
     fi 
-
-RUN apt-get upgrade -y
 
 COPY entrypoint.sh /entrypoint.sh
 

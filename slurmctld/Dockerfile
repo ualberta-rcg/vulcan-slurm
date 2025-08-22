@@ -2,6 +2,14 @@
 FROM debian:bullseye-slim
 
 # =============================================================================
+# ENVIRONMENT VARIABLES - Standardized across all Slurm services
+# =============================================================================
+
+# Set default environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm
+
+# =============================================================================
 # LDAP CONFIGURATION - Standardized across Slurm services that require it
 # =============================================================================
 
@@ -32,6 +40,10 @@ RUN groupadd -g 971 slurmrest && useradd -u 971 -g 971 -m -s /bin/false slurmres
 RUN groupadd -g 2001 distgroup && \
     useradd -u 2001 -m -d /local/home/dist -g distgroup -s /bin/bash dist
 
+# =============================================================================
+# PACKAGE INSTALLATION - Standardized across all Slurm services
+# =============================================================================
+
 # Install Packages
 RUN apt-get update && apt-get install -y \
     libpmix-dev \
@@ -56,8 +68,7 @@ RUN apt-get update && apt-get install -y \
     bsd-mailx \
     msmtp \
     msmtp-mta \
-    ca-certificates \
-    && ls -l
+    ca-certificates
 
 # =============================================================================
 # MUNGE SETUP - Standardized across all Slurm services
@@ -81,8 +92,6 @@ from vulcan-slurm-alerts@westdri.ca
 EOF
 
 RUN chmod 644 /etc/msmtprc
-
-RUN cat /etc/msmtprc 
 
 # Copy all .deb files into the container
 COPY *.deb /tmp/

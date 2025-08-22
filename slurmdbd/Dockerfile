@@ -2,6 +2,14 @@
 FROM debian:bullseye-slim
 
 # =============================================================================
+# ENVIRONMENT VARIABLES - Standardized across all Slurm services
+# =============================================================================
+
+# Set default environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm
+
+# =============================================================================
 # LDAP CONFIGURATION - Standardized across Slurm services that require it
 # =============================================================================
 
@@ -32,6 +40,10 @@ RUN groupadd -g 971 slurmrest && useradd -u 971 -g 971 -m -s /bin/false slurmres
 RUN groupadd -g 2001 distgroup && \
     useradd -u 2001 -m -d /local/home/dist -g distgroup -s /bin/bash dist
 
+# =============================================================================
+# PACKAGE INSTALLATION - Standardized across all Slurm services
+# =============================================================================
+
 # Install Packages
 RUN apt-get update && apt-get install -y \
     libpmix-dev \
@@ -40,6 +52,7 @@ RUN apt-get update && apt-get install -y \
     libopenmpi3 \
     openmpi-bin \
     mailutils \
+    curl \
     munge \
     ldap-utils \
     libldap-common \
@@ -98,7 +111,9 @@ RUN chmod +x /entrypoint.sh && \
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/log/* /usr/src/* \
-    /usr/share/doc /usr/share/man /usr/share/locale /usr/share/info
+    /usr/share/doc /usr/share/man /usr/share/locale /usr/share/info && \
+    mkdir -p /etc/hosts.d/ && touch /etc/hosts.d/hosts && \
+    sed -i -E 's/^(passwd:\s*)files/\1slurm files/; s/^(group:\s*)files/\1slurm files/; s/^(hosts:\s*files)/\1 slurm/' /etc/nsswitch.conf
 
 # Expose required ports
 EXPOSE 6819
