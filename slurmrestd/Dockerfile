@@ -7,6 +7,10 @@ RUN echo "nslcd nslcd/ldap-uris string ldap://localhost" | debconf-set-selection
     echo "libnss-ldapd libnss-ldapd/nsswitch multiselect passwd, group, shadow" | debconf-set-selections && \
     echo "libpam-ldapd libpam-ldapd/enable-debug boolean false" | debconf-set-selections
 
+# =============================================================================
+# USER & GROUP SETUP - Standardized across all Slurm services
+# =============================================================================
+
 # Ensure UID and GID 999 for slurm before package installation
 RUN groupadd -g 999 slurm && useradd -u 999 -g 999 -m -s /bin/bash slurm
 
@@ -37,6 +41,13 @@ RUN apt-get update && apt-get install -y \
     libldap-common \
     libnss-ldapd \
     libpam-ldapd 
+
+# =============================================================================
+# MUNGE SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# Install Munge package
+# Note: munge package is already included in the apt-get install above
 
 # Copy all .deb files into the container
 COPY *.deb /tmp/
@@ -71,7 +82,10 @@ RUN apt-get upgrade -y
 
 COPY entrypoint.sh /entrypoint.sh
 
-# Clean Up
+# =============================================================================
+# CLEANUP - Standardized across all Slurm services
+# =============================================================================
+
 RUN chmod +x /entrypoint.sh && \
     apt-get purge -y \
     man-db && \
@@ -80,9 +94,8 @@ RUN chmod +x /entrypoint.sh && \
     rm -rf /var/lib/apt/lists/* /tmp/* \
     /var/tmp/* /var/log/* /usr/share/doc /usr/share/man \
     /usr/share/locale /usr/share/info && \
-    mkdir -p /etc/hosts.d/ /run/munge && touch /etc/hosts.d/hosts && \
-    sed -i -E 's/^(passwd:\s*)files/\1slurm files/; s/^(group:\s*)files/\1slurm files/; s/^(hosts:\s*files)/\1 slurm/' /etc/nsswitch.conf && \
-    chown munge:munge -R /run/munge
+    mkdir -p /etc/hosts.d/ && touch /etc/hosts.d/hosts && \
+    sed -i -E 's/^(passwd:\s*)files/\1slurm files/; s/^(group:\s*)files/\1slurm files/; s/^(hosts:\s*files)/\1 slurm/' /etc/nsswitch.conf
 
 # Expose required ports
 EXPOSE 6820

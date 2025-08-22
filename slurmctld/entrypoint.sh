@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# =============================================================================
+# LOG REDIRECTION - Standardized across all Slurm services
+# =============================================================================
+
 # Redirect logs to stdout and stderr for Kubernetes
 if [ -z "${LOG_FILE}" ] || [ "${LOG_FILE}" = "/var/log/slurm/slurmctld.log" ]; then
   export LOG_FILE=/dev/stdout
@@ -14,14 +18,13 @@ if [ ! -f "$JWT_KEY_PATH" ]; then
 fi
 
 # Set proper permissions for slurm.conf
-mkdir -p /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm /run/munge 
+mkdir -p /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm
 touch /var/log/slurm/slurm-dbd.log /var/log/slurm/slurmctld.log /var/spool/slurmctld/priority_last_decay_ran
-chown -R slurm:slurm /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm 
+chown -R slurm:slurm /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm
 chmod +x /usr/local/bin/slurm_jobscripts.py 
 chmod 755 /var/spool/slurmctld
 chmod 644 /etc/slurm/*.conf
 chmod 660 "$JWT_KEY_PATH"
-chown -R munge:munge /run/munge
 
 # Setup SSSD
 cp -r /etc/sssd/.secret/* /etc/sssd
@@ -45,7 +48,7 @@ chown munge:munge -R /etc/munge /run/munge
 chmod 400 /etc/munge/munge.key
 
 # Start munged daemon in background
-su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/var/log/munge/munge.log &" munge
+su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/dev/stdout &" munge
 
 # Wait for Munge to initialize
 sleep 2

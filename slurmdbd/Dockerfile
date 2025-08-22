@@ -1,6 +1,10 @@
 # Base image
 FROM debian:bullseye-slim
 
+# =============================================================================
+# USER & GROUP SETUP - Standardized across all Slurm services
+# =============================================================================
+
 # Ensure UID and GID 999 for slurm before package installation
 RUN groupadd -g 999 slurm && useradd -u 999 -g 999 -m -s /bin/bash slurm
 
@@ -18,7 +22,14 @@ RUN apt-get update && apt-get install -y \
     libopenmpi3 \
     openmpi-bin \
     mailutils \
-    munge 
+        munge
+
+# =============================================================================
+# MUNGE SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# Install Munge package
+# Note: munge package is already included in the apt-get install above
 
 # Copy all .deb files into the container
 COPY *.deb /tmp/
@@ -51,7 +62,10 @@ RUN cd /tmp && \
 
 COPY entrypoint.sh /entrypoint.sh
 
-# Clean Up
+# =============================================================================
+# CLEANUP - Standardized across all Slurm services
+# =============================================================================
+
 RUN chmod +x /entrypoint.sh && \
     apt-get purge -y \
     man-db && \

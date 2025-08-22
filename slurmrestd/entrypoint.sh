@@ -11,6 +11,10 @@ export SLURMRESTD_AUTH_TYPES=rest_auth/jwt
 # Listen on TCP port 6820 and a UNIX socket for security
 export SLURMRESTD_LISTEN="0.0.0.0:6820"
 
+# =============================================================================
+# LOG REDIRECTION - Standardized across all Slurm services
+# =============================================================================
+
 # Redirect logs to stdout and stderr for Kubernetes
 if [ -z "${LOG_FILE}" ] || [ "${LOG_FILE}" = "/var/log/slurm/slurmrestd.log" ]; then
   export LOG_FILE=/dev/stdout
@@ -37,7 +41,7 @@ chown munge:munge -R /etc/munge /run/munge
 chmod 400 /etc/munge/munge.key
 
 # Start munged daemon in background
-su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/var/log/munge/munge.log &" munge
+su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/dev/stdout &" munge
 
 # Wait for Munge to initialize
 sleep 2

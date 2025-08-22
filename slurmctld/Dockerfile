@@ -7,6 +7,10 @@ RUN echo "nslcd nslcd/ldap-uris string ldap://localhost" | debconf-set-selection
     echo "libnss-ldapd libnss-ldapd/nsswitch multiselect passwd, group, shadow" | debconf-set-selections && \
     echo "libpam-ldapd libpam-ldapd/enable-debug boolean false" | debconf-set-selections
 
+# =============================================================================
+# USER & GROUP SETUP - Standardized across all Slurm services
+# =============================================================================
+
 # Ensure UID and GID 999 for slurm before package installation
 RUN groupadd -g 999 slurm && useradd -u 999 -g 999 -m -s /bin/bash slurm
 
@@ -41,6 +45,13 @@ RUN apt-get update && apt-get install -y \
     msmtp-mta \
     ca-certificates \
     && ls -l
+
+# =============================================================================
+# MUNGE SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# Install Munge package
+# Note: munge package is already included in the apt-get install above
 
 RUN cat > /etc/msmtprc <<EOF
 defaults
@@ -95,7 +106,10 @@ RUN cd /tmp && \
 
 COPY entrypoint.sh /entrypoint.sh
 
-# Clean Up
+# =============================================================================
+# CLEANUP - Standardized across all Slurm services
+# =============================================================================
+
 RUN chmod +x /entrypoint.sh && \
     apt-get purge -y \
     man-db && \
