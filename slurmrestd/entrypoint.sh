@@ -57,5 +57,9 @@ su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/dev/stdout &" mung
 # Wait for Munge to initialize
 sleep 2
 
-# Run slurmctld as the slurm user
+# =============================================================================
+# SERVICE EXECUTION - Standardized across all Slurm services
+# =============================================================================
+
+# Run slurmrestd as the slurmrest user
 exec su -s /bin/bash slurmrest -c "slurmrestd $*"

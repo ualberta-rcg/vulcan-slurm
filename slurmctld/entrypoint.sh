@@ -81,5 +81,9 @@ done
 su -s /bin/bash -c "/usr/bin/python3 /usr/local/bin/slurm_jobscripts.py &" root
 #su -s /bin/bash -c "/usr/bin/python3 /usr/local/bin/slurm_jobscripts.py --verbose &" root
 
+# =============================================================================
+# SERVICE EXECUTION - Standardized across all Slurm services
+# =============================================================================
+
 # Run slurmctld as the slurm user
-exec su -s /bin/bash slurm -c "/usr/sbin/slurmctld $*"
+exec su -s /bin/bash slurm -c "/usr/sbin/slurmctld $@"

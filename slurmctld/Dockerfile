@@ -15,14 +15,22 @@ RUN echo "nslcd nslcd/ldap-uris string ldap://localhost" | debconf-set-selection
 # USER & GROUP SETUP - Standardized across all Slurm services
 # =============================================================================
 
-# Ensure UID and GID 999 for slurm before package installation
+# --- 1. Create Slurm service user (UID 999) ---
 RUN groupadd -g 999 slurm && useradd -u 999 -g 999 -m -s /bin/bash slurm
 
-# Ensure UID and GID 972 for Munge
+# --- 2. Create Munge authentication user (UID 972) ---
 RUN groupadd -g 972 munge && useradd -u 972 -g 972 -m -s /sbin/nologin munge 
 
-# Ensure UID and GID 1000 for Munge
-RUN groupadd -g 1000 wwgroup && useradd -u 1000 -g 972 -m -s /bin/bash wwuser
+# --- 3. Create wwuser user accounts (UID 1000) ---
+RUN groupadd -g 1000 wwgroup && \
+    useradd -u 1000 -m -d /local/home/wwuser -g wwgroup -G sudo,munge -s /bin/bash wwuser
+
+# --- 4. Create slurmrest user for REST API (UID 971) ---
+RUN groupadd -g 971 slurmrest && useradd -u 971 -g 971 -m -s /bin/false slurmrest
+
+# --- 5. Create distributive.network user (UID 1001) ---
+RUN groupadd -g 1001 distgroup && \
+    useradd -u 1001 -m -d /local/home/dist -g distgroup -s /bin/bash dist
 
 # Install Packages
 RUN apt-get update && apt-get install -y \
@@ -135,4 +143,4 @@ EXPOSE 6817
 # Entry point
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 #CMD ["-D", "-R", "-vvv", "-i", "-s"]
-CMD ["-D", "-R", "-i", "-s"]
+CMD ["-D", "-R", "-v", "-i", "-s"]
