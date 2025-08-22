@@ -1,6 +1,12 @@
 name: Build and Push Docker Images
 
 on:
+  workflow_dispatch:
+    inputs:
+      SLURM_VERSION_OVERRIDE:
+        description: 'Optional: Specific Slurm version to build (e.g., 24-11-5-1). Leave empty to use latest.'
+        required: false
+        default: ''
   pull_request:
     branches:
       - slurmctld
@@ -20,7 +26,81 @@ jobs:
       - name: 🛠️ Checkout Repository
         uses: actions/checkout@v4
 
+      - name: 🎯 Determine Target Slurm Version
+        id: vars
+        run: |
+          set -e # Exit on error
+          
+          # Install jq for JSON parsing
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+          
+          # Check if this is a manual dispatch with version override
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}" ]; then
+            echo "✅ Using manual dispatch version override: ${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}"
+            VERSION="${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}"
+          else
+            echo "🔍 No version override set. Detecting latest stable version..."
+            
+            # Fetch all tags from the SchedMD/slurm repo
+            TAGS=$(curl -s https://api.github.com/repos/SchedMD/slurm/tags | jq -r '.[].name')
+
+            # Filter for stable release tags (e.g., slurm-23-11-7-1) and get the latest
+            LATEST_TAG=$(echo "$TAGS" \
+            | grep -E '^slurm-[0-9]+-[0-9]+-[0-9]+-[0-9]+$' \
+            | sort -V \
+            | tail -n1)
+
+            if [ -z "$LATEST_TAG" ]; then
+              echo "❌ Could not determine the latest Slurm tag."
+              exit 1
+            fi
+
+            VERSION="${LATEST_TAG#slurm-}"
+            echo "🔬 Detected latest version: $VERSION"
+          fi
+          
+          # Convert version format for deb file matching (e.g., 24-11-5-1 -> 24.11.5-1)
+          DEB_VERSION=$(echo "$VERSION" | sed 's/^\([0-9]*\)-\([0-9]*\)-\([0-9]*\)-\([0-9]*\)$/\1.\2.\3-\4/')
+          
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "deb_version=${DEB_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: 🛑 Check if DEBs for this version already exist
+        id: version-check
+        run: |
+          version="${{ steps.vars.outputs.version }}"
+          debver="${{ steps.vars.outputs.deb_version }}"
+
+          echo "🔍 Inputs:"
+          echo "  Raw version       = $version"
+          echo "  Debian version    = $debver"
+          echo "  Search pattern    = *_${debver}_*.deb"
+
+          # Check for existing DEBs in the slurm-debs directory
+          if [ -d "slurm-debs" ]; then
+            count=$(find "slurm-debs" -type f -name "*_${debver}_*.deb" | wc -l || true)
+            if [ "$count" -gt 0 ]; then
+              echo "✅ DEBs for Slurm $version found. Proceeding with Docker build."
+              echo "skip_build=false" >> $GITHUB_OUTPUT
+            else
+              echo "❌ No DEB files found for Slurm $version. Cannot proceed with Docker build."
+              echo "skip_build=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ No slurm-debs directory found. Cannot proceed with Docker build."
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ⏭️ Skip Build - No DEB Files
+        if: steps.version-check.outputs.skip_build == 'true'
+        run: |
+          echo "🚫 Skipping Docker build process"
+          echo "   No DEB files found for Slurm version ${{ steps.vars.outputs.version }}"
+          echo "   Please ensure DEB packages are built first using the build-and-commit-slurm-debs workflow"
+
       - name: 🔍 Verify Directory for Branch
+        if: steps.version-check.outputs.skip_build == 'false'
         run: |
           if [ ! -d "./${BRANCH}" ]; then
             echo "Directory ./${BRANCH} does not exist for branch ${BRANCH}."
@@ -28,15 +108,26 @@ jobs:
           fi        
 
       - name: 📂 Copy .deb Files to Branch Directory
+        if: steps.version-check.outputs.skip_build == 'false'
         run: |
-          cp -v slurm-debs/*25.05.1-1*debian12.deb ./${BRANCH}/   
+          # Copy only DEB files that exactly match the Slurm version
+          echo "🔍 Looking for DEB files matching version: ${{ steps.vars.outputs.deb_version }}"
+          
+          # Find and copy only DEB files with the exact version
+          find slurm-debs -type f -name "*_${{ steps.vars.outputs.deb_version }}_*.deb" -exec cp -v {} ./${BRANCH}/ \;
+          
+          # Verify what was copied
+          echo "📦 Copied DEB files:"
+          ls -la ./${BRANCH}/*.deb 2>/dev/null || echo "No DEB files found in ${BRANCH} directory"
 
       - name: 🐳 Build Docker Image
+        if: steps.version-check.outputs.skip_build == 'false'
         run: |
           cd ${BRANCH}
           docker build -t $DOCKER_REPO:${BRANCH} .
 
       - name: 🚀 Push Docker Image
+        if: steps.version-check.outputs.skip_build == 'false'
         run: |
           cd ${BRANCH}      
           echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USER }}" --password-stdin
