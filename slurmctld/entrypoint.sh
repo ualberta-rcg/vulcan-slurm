@@ -30,19 +30,28 @@ chmod 600 /etc/sssd/sssd.conf
 chown root:root /etc/sssd
 chown root:root /etc/sssd/sssd.conf
 
-# Setup Munge
+# =============================================================================
+# MUNGE SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# Create Munge runtime directory
+mkdir -p /run/munge
+
+# Copy Munge key from secrets
 cp /etc/munge/.secret/munge.key /etc/munge/munge.key
-chown munge:munge -R /etc/munge
+
+# Set proper ownership and permissions
+chown munge:munge -R /etc/munge /run/munge
 chmod 400 /etc/munge/munge.key
 
-# Start munged in the background
+# Start munged daemon in background
 su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/var/log/munge/munge.log &" munge
+
+# Wait for Munge to initialize
+sleep 2
 
 # Start sssd in the background
 su -s /bin/bash -c "/usr/sbin/sssd -i -d 6 &" root
-
-# Wait briefly for munge to start
-sleep 2
 
 # Verify that the slurmdbd is accessible before starting slurmctld
 timeout=60

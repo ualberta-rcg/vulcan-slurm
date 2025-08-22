@@ -9,16 +9,24 @@ fi
 chown slurm:slurm /etc/slurm/slurmdbd.conf
 chmod 600 /etc/slurm/slurmdbd.conf
 
-# Setup Munge
-mkdir /run/munge 
+# =============================================================================
+# MUNGE SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# Create Munge runtime directory
+mkdir -p /run/munge
+
+# Copy Munge key from secrets
 cp /etc/munge/.secret/munge.key /etc/munge/munge.key
-chown munge:munge -R /etc/munge /run/munge 
+
+# Set proper ownership and permissions
+chown munge:munge -R /etc/munge /run/munge
 chmod 400 /etc/munge/munge.key
 
-# Start munge
+# Start munged daemon in background
 su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/var/log/munge/munge.log &" munge
 
-# Wait briefly for munge to start
+# Wait for Munge to initialize
 sleep 2
 
 # Run slurmdbd

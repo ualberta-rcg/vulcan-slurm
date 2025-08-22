@@ -63,8 +63,9 @@ RUN cat /etc/msmtprc
 # Copy all .deb files into the container
 COPY *.deb /tmp/
 
-# Copy the Job Submit Script in. From Trailblazing Turtle. 
-COPY slurm_jobscripts.py /usr/local/bin/
+# Download the latest slurm_jobscripts.py from TrailblazingTurtle
+RUN curl -L -o /usr/local/bin/slurm_jobscripts.py \
+    https://raw.githubusercontent.com/guilbaults/TrailblazingTurtle/main/slurm_jobscripts/slurm_jobscripts.py
 
 SHELL ["/bin/bash", "-c"]
 

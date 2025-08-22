@@ -22,20 +22,28 @@ touch /var/log/slurm/slurmrestd.log
 chown -R slurm:slurm /var/spool/slurmd /var/log/slurm/ /var/run/slurm /etc/slurm
 chmod 644 /etc/slurm/*.conf
 
-# Setup Munge
-mkdir /run/munge 
+# =============================================================================
+# MUNGE SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# Create Munge runtime directory
+mkdir -p /run/munge
+
+# Copy Munge key from secrets
 cp /etc/munge/.secret/munge.key /etc/munge/munge.key
-chown munge:munge -R /etc/munge /run/munge 
+
+# Set proper ownership and permissions
+chown munge:munge -R /etc/munge /run/munge
 chmod 400 /etc/munge/munge.key
 
-# Start munged in the background
+# Start munged daemon in background
 su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/var/log/munge/munge.log &" munge
+
+# Wait for Munge to initialize
+sleep 2
 
 # Start sssd in the background
 su -s /bin/bash -c "/usr/sbin/sssd -i -d 9 &" root
-
-# Wait briefly for munge to start
-sleep 2
 
 # Run slurmctld as the slurm user
 exec su -s /bin/bash slurmrest -c "slurmrestd $*"
