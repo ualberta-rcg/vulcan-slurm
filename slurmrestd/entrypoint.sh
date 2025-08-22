@@ -20,11 +20,22 @@ if [ -z "${LOG_FILE}" ] || [ "${LOG_FILE}" = "/var/log/slurm/slurmrestd.log" ]; 
   export LOG_FILE=/dev/stdout
 fi
 
-# Set proper permissions for slurm directories
+# =============================================================================
+# DIRECTORY SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# Create required directories for slurmrestd
 mkdir -p /var/spool/slurmd /var/log/slurm/ /var/run/slurm /etc/slurm
 touch /var/log/slurm/slurmrestd.log
 chown -R slurm:slurm /var/spool/slurmd /var/log/slurm/ /var/run/slurm /etc/slurm
 chmod 644 /etc/slurm/*.conf
+
+# =============================================================================
+# SSSD SETUP - Standardized across Slurm services that require it
+# =============================================================================
+
+# Start sssd in the background
+su -s /bin/bash -c "/usr/sbin/sssd -i -d 9 &" root
 
 # =============================================================================
 # MUNGE SETUP - Standardized across all Slurm services
@@ -45,9 +56,6 @@ su -s /bin/bash -c "/usr/sbin/munged --foreground --log-file=/dev/stdout &" mung
 
 # Wait for Munge to initialize
 sleep 2
-
-# Start sssd in the background
-su -s /bin/bash -c "/usr/sbin/sssd -i -d 9 &" root
 
 # Run slurmctld as the slurm user
 exec su -s /bin/bash slurmrest -c "slurmrestd $*"

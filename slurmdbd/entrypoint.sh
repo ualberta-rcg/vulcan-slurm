@@ -9,7 +9,11 @@ if [ -z "${LOG_FILE}" ] || [ "${LOG_FILE}" = "/var/log/slurm/slurm-dbd.log" ]; t
   export LOG_FILE=/dev/stdout
 fi
 
-# Slurm 
+# =============================================================================
+# DIRECTORY SETUP - Standardized across all Slurm services
+# =============================================================================
+
+# slurmdbd-specific configuration
 chown slurm:slurm /etc/slurm/slurmdbd.conf
 chmod 600 /etc/slurm/slurmdbd.conf
 

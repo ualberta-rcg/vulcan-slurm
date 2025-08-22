@@ -2,6 +2,16 @@
 FROM debian:bullseye-slim
 
 # =============================================================================
+# LDAP CONFIGURATION - Standardized across Slurm services that require it
+# =============================================================================
+
+# Pre-configure LDAP packages to avoid interactive prompts
+RUN echo "nslcd nslcd/ldap-uris string ldap://localhost" | debconf-set-selections && \
+    echo "nslcd nslcd/ldap-base string dc=example,dc=com" | debconf-set-selections && \
+    echo "libnss-ldapd libnss-ldapd/nsswitch multiselect passwd, group, shadow" | debconf-set-selections && \
+    echo "libpam-ldapd libpam-ldapd/enable-debug boolean false" | debconf-set-selections
+
+# =============================================================================
 # USER & GROUP SETUP - Standardized across all Slurm services
 # =============================================================================
 
@@ -22,7 +32,11 @@ RUN apt-get update && apt-get install -y \
     libopenmpi3 \
     openmpi-bin \
     mailutils \
-        munge
+    munge \
+    ldap-utils \
+    libldap-common \
+    libnss-ldapd \
+    libpam-ldapd
 
 # =============================================================================
 # MUNGE SETUP - Standardized across all Slurm services
@@ -33,6 +47,10 @@ RUN apt-get update && apt-get install -y \
 
 # Copy all .deb files into the container
 COPY *.deb /tmp/
+
+# =============================================================================
+# DEB INSTALLATION - Standardized across all Slurm services
+# =============================================================================
 
 SHELL ["/bin/bash", "-c"]
 

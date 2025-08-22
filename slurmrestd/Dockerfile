@@ -1,6 +1,10 @@
 # Base image
 FROM debian:bullseye-slim
 
+# =============================================================================
+# LDAP CONFIGURATION - Standardized across Slurm services that require it
+# =============================================================================
+
 # Pre-configure LDAP packages to avoid interactive prompts
 RUN echo "nslcd nslcd/ldap-uris string ldap://localhost" | debconf-set-selections && \
     echo "nslcd nslcd/ldap-base string dc=example,dc=com" | debconf-set-selections && \
@@ -51,6 +55,10 @@ RUN apt-get update && apt-get install -y \
 
 # Copy all .deb files into the container
 COPY *.deb /tmp/
+
+# =============================================================================
+# DEB INSTALLATION - Standardized across all Slurm services
+# =============================================================================
 
 SHELL ["/bin/bash", "-c"]
 

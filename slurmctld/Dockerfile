@@ -1,6 +1,10 @@
 # Base image
 FROM debian:bullseye-slim
 
+# =============================================================================
+# LDAP CONFIGURATION - Standardized across Slurm services that require it
+# =============================================================================
+
 # Pre-configure LDAP packages to avoid interactive prompts
 RUN echo "nslcd nslcd/ldap-uris string ldap://localhost" | debconf-set-selections && \
     echo "nslcd nslcd/ldap-base string dc=example,dc=com" | debconf-set-selections && \
@@ -77,6 +81,10 @@ COPY *.deb /tmp/
 # Download the latest slurm_jobscripts.py from TrailblazingTurtle
 RUN curl -L -o /usr/local/bin/slurm_jobscripts.py \
     https://raw.githubusercontent.com/guilbaults/TrailblazingTurtle/main/slurm_jobscripts/slurm_jobscripts.py
+
+# =============================================================================
+# DEB INSTALLATION - Standardized across all Slurm services
+# =============================================================================
 
 SHELL ["/bin/bash", "-c"]
 
