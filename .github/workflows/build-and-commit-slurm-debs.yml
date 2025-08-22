@@ -8,7 +8,7 @@ on:
         required: false
         default: ''
   schedule:
-    - cron: '0,5,10,15,20,25,30,35,40,45,50,55 * * * *'  # Every 5 minutes (explicit format)
+    - cron: '0 0 * * 0'
 
 jobs:
   build-debs:
