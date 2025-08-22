@@ -49,6 +49,10 @@ jobs:
         id: vars
         run: |
           set -e # Exit on error
+
+          apt-get update
+
+          apt=get install jq curl -y
           
           # Check if this is a manual dispatch with version override
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}" ]; then
@@ -88,7 +92,7 @@ jobs:
           version="${{ steps.vars.outputs.version }}"
           debver="$(echo "$version" | sed 's/^\([0-9]*\)-\([0-9]*\)-\([0-9]*\)-\([0-9]*\)$/\1.\2.\3-\4/')"
           debdir="$GITHUB_WORKSPACE/slurm-debs"
-          OS_CODENAME="b11"  # Changed from u2404 to b11 (Debian Bullseye)
+          OS_CODENAME="b11"  
 
           echo "🔍 Inputs:"
           echo "  Raw version       = $version"
