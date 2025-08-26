@@ -7,8 +7,6 @@ on:
         description: 'Optional: Specific Slurm version to build (e.g., 24-11-5-1). Leave empty to use latest.'
         required: false
         default: ''
-  schedule:
-    - cron: '0 0 * * 0'
 
 jobs:
   build-and-commit-debs:
