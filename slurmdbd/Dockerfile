@@ -112,7 +112,7 @@ RUN chmod +x /entrypoint.sh && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/log/* /usr/src/* \
     /usr/share/doc /usr/share/man /usr/share/locale /usr/share/info && \
-    mkdir -p /etc/hosts.d/ && touch /etc/hosts.d/hosts && \
+    mkdir -p /etc/hosts.d/ /var/spool/slurmd && touch /etc/hosts.d/hosts && \
     sed -i -E 's/^(passwd:\s*)files/\1slurm files/; s/^(group:\s*)files/\1slurm files/; s/^(hosts:\s*files)/\1 slurm/' /etc/nsswitch.conf
 
 # Expose required ports
