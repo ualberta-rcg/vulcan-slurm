@@ -13,14 +13,6 @@ fi
 # DIRECTORY SETUP - Standardized across all Slurm services
 # =============================================================================
 
-# Ensure the Slurm JWT key exists
-JWT_KEY_PATH="/var/spool/slurmctld/jwt_hs256.key"
-
-if [ ! -f "$JWT_KEY_PATH" ]; then
-    echo "Creating JWT key for Slurm..."
-    openssl rand -hex 32 > "$JWT_KEY_PATH"
-fi
-
 # Create required directories for slurmctld
 mkdir -p /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm
 touch /var/log/slurm/slurm-dbd.log /var/log/slurm/slurmctld.log /var/spool/slurmctld/priority_last_decay_ran
@@ -28,6 +20,14 @@ chown -R slurm:slurm /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd 
 chmod +x /usr/local/bin/slurm_jobscripts.py 
 chmod 755 /var/spool/slurmctld
 chmod 644 /etc/slurm/*.conf
+
+# Ensure the Slurm JWT key exists
+JWT_KEY_PATH="/var/spool/slurmctld/jwt_hs256.key"
+
+if [ ! -f "$JWT_KEY_PATH" ]; then
+    echo "Creating JWT key for Slurm..."
+    openssl rand -hex 32 > "$JWT_KEY_PATH"
+fi
 chmod 660 "$JWT_KEY_PATH"
 
 # =============================================================================
