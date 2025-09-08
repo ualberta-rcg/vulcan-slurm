@@ -40,13 +40,6 @@ RUN groupadd -g 971 slurmrest && useradd -u 971 -g 971 -m -s /bin/false slurmres
 RUN groupadd -g 2001 distgroup && \
     useradd -u 2001 -m -d /local/home/dist -g distgroup -s /bin/bash dist
 
-# Create required directories for slurmdbd
-mkdir -p /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm
-touch /var/log/slurm/slurm-dbd.log /var/log/slurm/slurmctld.log /var/spool/slurmctld/priority_last_decay_ran
-chown -R slurm:slurm /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm
-chmod 755 /var/spool/slurmdbd
-chmod 644 /etc/slurm/*.conf
-
 # =============================================================================
 # PACKAGE INSTALLATION - Standardized across all Slurm services
 # =============================================================================
