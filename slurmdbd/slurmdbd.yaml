@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
       - name: slurmdbd
-        image: rkhoja/slurm:slurmdbd
+        image: rkhoja/vulcan-slurm:slurmdbd
         imagePullPolicy: Always
         volumeMounts:
         - name: nfs-munge-key
