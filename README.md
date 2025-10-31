@@ -1,164 +1,178 @@
 <img src="https://www.ualberta.ca/en/toolkit/media-library/homepage-assets/ua_logo_green_rgb.png" alt="University of Alberta Logo" width="50%" />
 
-# Warewulf Slurmd Node Image
+# Vulcan Slurm Control Services
 
-[![CI/CD](https://github.com/ualberta-rcg/warewulf-slurmd/actions/workflows/deploy-warewulf-slurmd.yml/badge.svg)](https://github.com/ualberta-rcg/warewulf-slurmd/actions/workflows/deploy-warewulf-slurmd.yml)
-![Docker Pulls](https://img.shields.io/docker/pulls/rkhoja/warewulf-slurmd?style=flat-square)
+[![CI/CD](https://github.com/ualberta-rcg/vulcan-slurm/actions/workflows/build-push-workflow.yml/badge.svg)](https://github.com/ualberta-rcg/vulcan-slurm/actions/workflows/build-push-workflow.yml)
+![Docker Pulls](https://img.shields.io/docker/pulls/rkhoja/vulcan-slurm?style=flat-square)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
 **Maintained by:** Rahim Khoja ([khoja1@ualberta.ca](mailto:khoja1@ualberta.ca)) & Karim Ali ([kali2@ualberta.ca](mailto:kali2@ualberta.ca))
 
 ## 🧰 Description
 
-This repository contains a hardened **Slurm compute node image** based on Ubuntu 24.04, built into a Docker container that is **Warewulf-compatible** and deployable on bare metal.
+This repository contains **three hardened Docker containers** for Slurm control plane services, based on Debian Bullseye. These containers are designed for production deployment in Kubernetes environments and provide the core Slurm cluster management services.
 
-It's primarily used for imaging and provisioning Slurm compute nodes using [Warewulf 4](https://warewulf.org) in high-performance computing clusters. The image includes the full Slurm daemon stack and CIS security hardening using the SCAP Security Guide.
+The images are automatically built weekly (every Monday) or can be manually triggered via GitHub Actions.
 
-The image is automatically built and pushed to Docker Hub using GitHub Actions whenever changes are pushed to the `latest` branch.
+## 📦 Docker Images
 
-## 📦 Docker Image
+**Docker Hub:** [rkhoja/vulcan-slurm](https://hub.docker.com/r/rkhoja/vulcan-slurm)
 
-**Docker Hub:** [rkhoja/warewulf-slurmd:latest](https://hub.docker.com/r/rkhoja/warewulf-slurmd)
+The repository builds three separate Docker images:
+
+### 1. **slurmctld** - Slurm Controller Daemon
+The primary Slurm controller that manages the entire cluster, schedules jobs, and coordinates with compute nodes.
 
 ```bash
-docker pull rkhoja/warewulf-slurmd:latest
+docker pull rkhoja/vulcan-slurm:slurmctld
+docker pull rkhoja/vulcan-slurm:slurmctld-24-11-6-1  # Version-specific tag
 ```
+
+**Port:** `6817`  
+**Service:** Job scheduling and cluster coordination
+
+### 2. **slurmdbd** - Slurm Database Daemon
+The accounting database daemon that stores job accounting, resource usage, and cluster state information.
+
+```bash
+docker pull rkhoja/vulcan-slurm:slurmdbd
+docker pull rkhoja/vulcan-slurm:slurmdbd-24-11-6-1  # Version-specific tag
+```
+
+**Port:** `6819`  
+**Service:** Job accounting and database operations
+
+### 3. **slurmrestd** - Slurm REST API Daemon
+The RESTful API service that provides programmatic access to Slurm cluster information and operations.
+
+```bash
+docker pull rkhoja/vulcan-slurm:slurmrestd
+docker pull rkhoja/vulcan-slurm:slurmrestd-24-11-6-1  # Version-specific tag
+```
+
+**Port:** `6820`  
+**Service:** RESTful API for Slurm operations
 
 ## 🏗️ What's Inside
 
-This container includes:
+Each container includes:
 
-* **Slurm 24.11+** (installed from custom DEB packages)
-* **Slurm daemon** (`slurmd`) and client tools
-* **Optional kernel installation** with configurable version
-* **Optional NVIDIA driver support** (requires kernel installation)
-* SSH, networking tools, monitoring utilities, debugging tools
-* SCAP CIS Level 2 hardening (automatically applied)
-* Systemd-based boot compatible with Warewulf PXE deployments
-* Pre-created `wwuser` (UID/GID 1001) and `slurm` (UID/GID 999) users
-* `changeme` root password (change in production!)
+* **Slurm 24.11+** (installed from custom DEB packages in `slurm-debs/`)
+* **Service-specific Slurm components** (each image includes only what's needed)
+* **Munge** authentication daemon for secure inter-service communication
+* **SSSD/LDAP** support for user authentication and directory services
+* **OpenMPI** and PMIx libraries for MPI job support
+* **Python 3** with `slurm_jobscripts.py` for advanced job management
+* **Email notification** via msmtp (configured for U of A SMTP)
+* Standardized user accounts:
+  * `slurm` (UID 999) - Slurm service user
+  * `munge` (UID 972) - Munge authentication user
+  * `wwuser` (UID 2000) - Warewulf user account
+  * `slurmrest` (UID 971) - REST API service user
+  * `dist` (UID 2001) - Distributive network user
 
-**Slurm** ([docs](https://slurm.schedmd.com/)) is ready for integration with existing Slurm clusters.
+**Slurm** ([docs](https://slurm.schedmd.com/)) is fully configured and ready for production deployment.
 
-## 🚀 Build Options
+## 🚀 How It Works
 
-The image supports several build-time configurations:
+### Automated Build Pipeline
 
-### **Kernel Installation**
-- **With Kernel** (default): Installs specific Linux kernel version with headers and modules
-- **No Kernel**: Skips kernel installation for use with host kernel or different kernel management
+This repository uses a **two-stage automated build process**:
 
-### **NVIDIA Support**
-- **Enabled**: Installs NVIDIA drivers (requires kernel installation)
-- **Disabled**: No NVIDIA components (faster builds, smaller images)
+#### Stage 1: DEB Package Building (`build-and-commit-slurm-debs.yml`)
 
-### **Slurm Version**
-- **Latest**: Automatically detects and uses latest stable Slurm release
-- **Specific**: Override with exact version (e.g., `24-11-6-1`)
+1. **Auto-detects latest Slurm version** from the official [SchedMD/slurm](https://github.com/SchedMD/slurm) repository
+2. **Checks if DEBs already exist** - skips build if packages for that version are already in `slurm-debs/`
+3. **Downloads Slurm source** tarball from GitHub releases
+4. **Builds DEB packages** using `debuild` in a Debian Bullseye container
+5. **Commits DEBs** to the `slurm-debs/` directory in this repository
 
-### **Autologin & Firstboot**
-- **Console Autologin**: Optional root autologin for debugging
-- **Firstboot Service**: Optional Ansible playbook execution on first boot
+#### Stage 2: Docker Image Building (`build-push-workflow.yml`)
 
-## 🏷️ Docker Tags
+1. **Detects Slurm version** (latest from GitHub API or manual override)
+2. **Verifies DEBs exist** - requires matching DEB packages in `slurm-debs/` directory
+3. **Builds all three Docker images** in sequence:
+   - Each Dockerfile filters which DEB packages to install:
+     - `slurmctld`: Excludes `slurmdbd`, `slurmd`, `slurmrestd` packages
+     - `slurmdbd`: Excludes `slurmctld`, `slurmrestd` packages
+     - `slurmrestd`: Excludes `slurmdbd`, `slurmd`, `slurmctld` packages
+4. **Tags each image** with:
+   - Service tag: `slurmctld`, `slurmdbd`, `slurmrestd` (latest)
+   - Version tag: `slurmctld-24-11-6-1`, `slurmdbd-24-11-6-1`, etc.
+5. **Pushes to Docker Hub**
 
-Images are tagged with a descriptive naming scheme:
+### Weekly Automated Builds
 
-**With Kernel + NVIDIA:**
-```bash
-u24-6.8.0-31-slurm-24.11.6-1-nv570.148
-# Ubuntu 24.04 + Kernel 6.8.0-31 + Slurm 24.11.6-1 + NVIDIA 570.148
-```
+The **Weekly Orchestrator** (`weekly-orchestrator.yml`) automatically runs **every Monday at 2:00 AM UTC**:
 
-**With Kernel Only:**
-```bash
-u24-6.8.0-31-slurm-24.11.6-1
-# Ubuntu 24.04 + Kernel 6.8.0-31 + Slurm 24.11.6-1
-```
+1. Triggers DEB package build workflow (Stage 1)
+2. Waits 15 minutes for DEB build to complete
+3. Triggers Docker image build workflow (Stage 2)
 
-**No Kernel:**
-```bash
-slurm-24.11.6-1
-# Slurm 24.11.6-1 only (no kernel, no NVIDIA)
-```
+This ensures Docker images stay up-to-date with the latest Slurm releases automatically.
+
+### Dockerfile Structure
+
+All three containers share a standardized structure:
+- **Base**: Debian Bullseye Slim
+- **Standardized Setup**: Common user/group creation, package installation, and configuration
+- **Service-Specific Filtering**: Each container intelligently installs only the required Slurm DEB packages
+- **Entrypoint Scripts**: Handle Munge initialization, directory setup, and service startup
 
 ## 🛠️ GitHub Actions - CI/CD Pipeline
 
-This project includes a GitHub Actions workflow: `.github/workflows/deploy-warewulf-slurmd.yml`.
+### Manual Build Trigger
 
-### 🔄 What It Does
+You can manually trigger either workflow:
 
-* Builds the Docker image from the `Dockerfile` with configurable options
-* Automatically detects latest Slurm and kernel versions
-* Generates appropriate Docker tags based on configuration
-* Logs into Docker Hub using stored GitHub Secrets
-* Pushes the image with descriptive tagging
+**Build DEBs:**
+1. Go to **Actions** → **Build and Commit Slurm DEB Packages**
+2. Click **Run workflow**
+3. Optionally specify a Slurm version override (e.g., `24-11-6-1`)
 
-### 🎛️ Build Configuration Options
+**Build Docker Images:**
+1. Go to **Actions** → **Build and Push Docker Images**
+2. Click **Run workflow**
+3. Optionally specify a Slurm version override (must match existing DEBs)
 
-The GitHub Actions workflow provides several build-time options that you can configure when manually triggering the build:
+**Note:** Docker builds require DEB packages to exist first. If no DEBs are found, the workflow will skip the build.
 
-![GitHub Actions Build Options](slurmd-actions.png)
+### ✅ Setting Up GitHub Secrets & Variables
 
-**Available Options:**
-- **Kernel Installation**: Choose whether to include a specific Linux kernel
-- **NVIDIA Support**: Enable/disable NVIDIA driver installation
-- **Slurm Version**: Select specific Slurm version or use latest
-- **Console Autologin**: Enable root autologin for debugging
-- **Firstboot Service**: Enable Ansible playbook execution on first boot
+To enable pushing to Docker Hub:
 
-### 🍴 Forking for Custom Versions
-
-**Important:** If you want to customize this image for your own environment or requirements, please **fork this repository** rather than using it directly. This allows you to:
-
-- Modify build parameters for your specific needs
-- Add custom packages or configurations
-- Maintain your own version control
-- Customize the CI/CD pipeline for your infrastructure
-
-Most of the information needed to get started is already documented in this README, including the required GitHub Secrets setup and workflow configuration.
-
-### ✅ Setting Up GitHub Secrets
-
-To enable pushing to your Docker Hub:
-
-1. Go to your fork's GitHub repo → **Settings** → **Secrets and variables** → **Actions**
-2. Add the following:
-
-   * `DOCKER_HUB_REPO` → your Docker Hub repo. In this case: *rkhoja/warewulf-slurmd*
+1. Go to **Settings** → **Secrets and variables** → **Actions**
+2. Add **Repository Variables**:
+   * `DOCKER_HUB_REPO` → `rkhoja/vulcan-slurm`
    * `DOCKER_HUB_USER` → your Docker Hub username
+3. Add **Secret**:
    * `DOCKER_HUB_TOKEN` → create a [Docker Hub access token](https://hub.docker.com/settings/security)
 
-### 🚀 Manual Trigger & Auto-Build
+## 🧪 Deployment
 
-* **Manual**: Run the workflow from the **Actions** tab with **Run workflow** (enabled via `workflow_dispatch`)
-* **Automatic**: Any push to the `latest` branch triggers the CI/CD pipeline
+### Kubernetes
 
-**Recommended branching model:**
-```bash
-git checkout latest
-git merge main
-git push origin latest
-```
-
-## 🧪 How To Use This Image with Warewulf 4
-
-Once you have Warewulf 4 setup on your control node:
+Example Kubernetes configurations are provided in each service directory:
 
 ```bash
-# Import with kernel and NVIDIA support
-wwctl image import --build --force docker://rkhoja/warewulf-slurmd:u24-6.8.0-31-slurm-24.11.6-1-nv570.148 slurmd-gpu
-
-# Import with kernel only (no NVIDIA)
-wwctl image import --build --force docker://rkhoja/warewulf-slurmd:u24-6.8.0-31-slurm-24.11.6-1 slurmd-cpu
-
-# Import without kernel (use host kernel)
-wwctl image import --build --force docker://rkhoja/warewulf-slurmd:slurm-24.11.6-1 slurmd-minimal
+kubectl apply -f slurmctld/slurmctld.yaml
+kubectl apply -f slurmdbd/slurmdbd.yaml
+kubectl apply -f slurmrestd/slurmrestd.yaml
 ```
 
-### Warewulf Configuration
+### Required Configuration
 
-The image includes a firstboot service that can run Ansible playbooks for post-deployment configuration. Place your playbooks in `/etc/ansible/playbooks/*.yaml` on the deployed nodes.
+All containers require:
+- **Munge key**: Mount at `/etc/munge/.secret/munge.key`
+- **Slurm config**: Mount `slurm.conf` at `/etc/slurm/slurm.conf`
+- **Database config** (slurmctld): Mount `slurmdbd.conf` at `/etc/slurm/slurmdbd.conf`
+- **SSSD config** (if using LDAP): Mount at `/etc/sssd/`
+
+## 🔧 Service Details
+
+- **slurmctld**: Requires `slurmdbd` running. Auto-generates JWT key. Runs `slurm_jobscripts.py`.
+- **slurmdbd**: Requires MySQL/MariaDB backend (configure in `slurmdbd.conf`).
+- **slurmrestd**: JWT authentication. RESTful API on port 6820.
 
 ## 🤝 Support
 
