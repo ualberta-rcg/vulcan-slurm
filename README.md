@@ -47,7 +47,7 @@ See [slurmrestd/README.md](./slurmrestd/README.md) for detailed deployment instr
 
 Each container includes:
 
-* **Slurm 24.11+** (installed from custom DEB packages in `slurm-debs/`)
+* **Slurm** (latest version, installed from custom DEB packages in `slurm-debs/`) - Images are constantly rebuilt with the latest Slurm release. Older versions are available via version-specific tags (e.g., `slurmctld-24-11-6-1`)
 * **Service-specific Slurm components** (each image includes only what's needed)
 * **Munge** authentication daemon for secure inter-service communication
 * **SSSD/LDAP** support for user authentication and directory services
