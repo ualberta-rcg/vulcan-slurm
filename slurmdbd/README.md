@@ -1,11 +1,28 @@
+<img src="https://www.ualberta.ca/en/toolkit/media-library/homepage-assets/ua_logo_green_rgb.png" alt="University of Alberta Logo" width="50%" />
+
 # slurmdbd - Slurm Database Daemon
 
 The Slurm database daemon that stores job accounting, resource usage, and cluster state information in a MySQL/MariaDB database.
+
+![Docker Pulls](https://img.shields.io/docker/pulls/rkhoja/vulcan-slurm?label=slurmdbd&style=flat-square)
+
+**Maintained by:** Rahim Khoja ([khoja1@ualberta.ca](mailto:khoja1@ualberta.ca)) & Karim Ali ([kali2@ualberta.ca](mailto:kali2@ualberta.ca))
 
 ## 🐳 Docker Image
 
 **Image:** `rkhoja/vulcan-slurm:slurmdbd`  
 **Port:** `6819`
+
+### Pulling the Image
+
+```bash
+# Pull latest version
+docker pull rkhoja/vulcan-slurm:slurmdbd
+
+# Pull specific Slurm version
+docker pull rkhoja/vulcan-slurm:slurmdbd-24-11-6-1
+docker pull rkhoja/vulcan-slurm:slurmdbd-24-11-5-1
+```
 
 ## 📋 Requirements
 
@@ -212,3 +229,8 @@ If you see permission errors, ensure:
 - [slurmdbd.conf Configuration](https://slurm.schedmd.com/slurmdbd.conf.html)
 - [Main Repository README](../README.md)
 
+## 🧠 About University of Alberta Research Computing
+
+The [Research Computing Group](https://www.ualberta.ca/en/information-services-and-technology/research-computing/index.html) supports high-performance computing, data-intensive research, and advanced infrastructure for researchers at the University of Alberta and across Canada.
+
+We help design and operate compute environments that power innovation — from AI training clusters to national research infrastructure.

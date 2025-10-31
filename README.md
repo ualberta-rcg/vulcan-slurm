@@ -1,9 +1,8 @@
 <img src="https://www.ualberta.ca/en/toolkit/media-library/homepage-assets/ua_logo_green_rgb.png" alt="University of Alberta Logo" width="50%" />
 
-# Vulcan Slurm Control Services
+# Vulcan Slurm Containers
 
 [![CI/CD](https://github.com/ualberta-rcg/vulcan-slurm/actions/workflows/build-push-workflow.yml/badge.svg)](https://github.com/ualberta-rcg/vulcan-slurm/actions/workflows/build-push-workflow.yml)
-![Docker Pulls](https://img.shields.io/docker/pulls/rkhoja/vulcan-slurm?style=flat-square)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
 **Maintained by:** Rahim Khoja ([khoja1@ualberta.ca](mailto:khoja1@ualberta.ca)) & Karim Ali ([kali2@ualberta.ca](mailto:kali2@ualberta.ca))
@@ -20,38 +19,29 @@ The images are automatically built weekly (every Monday) or can be manually trig
 
 The repository builds three separate Docker images:
 
-### 1. **slurmctld** - Slurm Controller Daemon
+### 1. **[slurmctld](./slurmctld/README.md)** - Slurm Controller Daemon
 The primary Slurm controller that manages the entire cluster, schedules jobs, and coordinates with compute nodes.
-
-```bash
-docker pull rkhoja/vulcan-slurm:slurmctld
-docker pull rkhoja/vulcan-slurm:slurmctld-24-11-6-1  # Version-specific tag
-```
 
 **Port:** `6817`  
 **Service:** Job scheduling and cluster coordination
 
-### 2. **slurmdbd** - Slurm Database Daemon
-The accounting database daemon that stores job accounting, resource usage, and cluster state information.
+See [slurmctld/README.md](./slurmctld/README.md) for detailed deployment instructions and Docker pull commands.
 
-```bash
-docker pull rkhoja/vulcan-slurm:slurmdbd
-docker pull rkhoja/vulcan-slurm:slurmdbd-24-11-6-1  # Version-specific tag
-```
+### 2. **[slurmdbd](./slurmdbd/README.md)** - Slurm Database Daemon
+The accounting database daemon that stores job accounting, resource usage, and cluster state information.
 
 **Port:** `6819`  
 **Service:** Job accounting and database operations
 
-### 3. **slurmrestd** - Slurm REST API Daemon
-The RESTful API service that provides programmatic access to Slurm cluster information and operations.
+See [slurmdbd/README.md](./slurmdbd/README.md) for detailed deployment instructions and Docker pull commands.
 
-```bash
-docker pull rkhoja/vulcan-slurm:slurmrestd
-docker pull rkhoja/vulcan-slurm:slurmrestd-24-11-6-1  # Version-specific tag
-```
+### 3. **[slurmrestd](./slurmrestd/README.md)** - Slurm REST API Daemon
+The RESTful API service that provides programmatic access to Slurm cluster information and operations.
 
 **Port:** `6820`  
 **Service:** RESTful API for Slurm operations
+
+See [slurmrestd/README.md](./slurmrestd/README.md) for detailed deployment instructions and Docker pull commands.
 
 ## 🏗️ What's Inside
 
@@ -170,9 +160,9 @@ All containers require:
 
 ## 🔧 Service Details
 
-- **slurmctld**: Requires `slurmdbd` running. Auto-generates JWT key. Runs `slurm_jobscripts.py`.
-- **slurmdbd**: Requires MySQL/MariaDB backend (configure in `slurmdbd.conf`).
-- **slurmrestd**: JWT authentication. RESTful API on port 6820.
+- **[slurmctld](./slurmctld/README.md)**: Requires `slurmdbd` running. Auto-generates JWT key. Runs `slurm_jobscripts.py`.
+- **[slurmdbd](./slurmdbd/README.md)**: Requires MySQL/MariaDB backend (configure in `slurmdbd.conf`).
+- **[slurmrestd](./slurmrestd/README.md)**: JWT authentication. RESTful API on port 6820.
 
 ## 🤝 Support
 
