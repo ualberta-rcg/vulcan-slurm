@@ -124,6 +124,22 @@ jobs:
           src_dir=$(find . -maxdepth 1 -type d -name "slurm-*")
           mv "$src_dir" slurm-src
 
+      - name: 🔧 Fix PAM Directory Path in debian/rules
+        if: steps.version-check.outputs.skip_build == 'false'
+        run: |
+          set -e
+          cd /tmp/slurm/slurm-src
+          # Fix the PAM directory path from /usr/lib/x86_64-linux-gnu/security to /lib/x86_64-linux-gnu/security
+          # This is the correct path on Debian systems
+          if [ -f debian/rules ]; then
+            echo "🔧 Patching debian/rules to fix PAM directory path..."
+            # Replace /usr/lib/x86_64-linux-gnu/security with /lib/x86_64-linux-gnu/security
+            sed -i 's|/usr/lib/x86_64-linux-gnu/security|/lib/x86_64-linux-gnu/security|g' debian/rules
+            echo "✅ PAM directory path fixed in debian/rules"
+          else
+            echo "⚠️  debian/rules not found, skipping patch"
+          fi
+
       - name: 📦 Build Slurm DEBs
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
