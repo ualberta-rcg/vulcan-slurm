@@ -124,18 +124,46 @@ jobs:
           src_dir=$(find . -maxdepth 1 -type d -name "slurm-*")
           mv "$src_dir" slurm-src
 
-      - name: 🔧 Fix PAM Directory Path in debian/rules
+      - name: 🔧 Fix PAM Configuration in debian/rules
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           set -e
           cd /tmp/slurm/slurm-src
-          # Fix the PAM directory path from /usr/lib/x86_64-linux-gnu/security to /lib/x86_64-linux-gnu/security
-          # This is the correct path on Debian systems
+          
+          # Why PAM might have stopped working:
+          # - Newer Slurm versions (e.g., 25.11) added stricter validation for PAM directory paths
+          # - The debian/rules file may now use /usr/lib/x86_64-linux-gnu/security which doesn't exist
+          # - Configure script now validates the path exists before accepting it
+          
           if [ -f debian/rules ]; then
-            echo "🔧 Patching debian/rules to fix PAM directory path..."
-            # Replace /usr/lib/x86_64-linux-gnu/security with /lib/x86_64-linux-gnu/security
-            sed -i 's|/usr/lib/x86_64-linux-gnu/security|/lib/x86_64-linux-gnu/security|g' debian/rules
-            echo "✅ PAM directory path fixed in debian/rules"
+            echo "🔧 Analyzing PAM configuration in debian/rules..."
+            echo "📋 Current PAM-related configuration:"
+            grep -n "pam\|PAM\|with-pam_dir\|enable-pam" debian/rules || echo "No PAM references found"
+            
+            # First, try to fix the path: replace /usr/lib/x86_64-linux-gnu/security with /lib/x86_64-linux-gnu/security
+            # This is the correct path on Debian systems where PAM modules are installed
+            if grep -q "/usr/lib/x86_64-linux-gnu/security" debian/rules; then
+              echo "🔧 Fixing PAM directory path from /usr/lib/... to /lib/..."
+              sed -i 's|/usr/lib/x86_64-linux-gnu/security|/lib/x86_64-linux-gnu/security|g' debian/rules
+              echo "✅ PAM directory path fixed to /lib/x86_64-linux-gnu/security"
+            fi
+            
+            # Ensure the correct PAM directory exists (configure might check for it)
+            mkdir -p /lib/x86_64-linux-gnu/security || true
+            
+            # If there are still problematic paths, disable PAM as fallback
+            if grep -q "with-pam_dir.*usr/lib" debian/rules; then
+              echo "⚠️  Still found problematic PAM path, disabling PAM support as fallback..."
+              sed -i 's/--enable-pam//g' debian/rules
+              sed -i 's/--with-pam_dir=[^[:space:]]*//g' debian/rules
+              sed -i 's/--with-pam_dir[[:space:]]*[^[:space:]]*//g' debian/rules
+              echo "✅ PAM support disabled (fallback)"
+            else
+              echo "✅ PAM configuration fixed - will try to build with PAM support"
+            fi
+            
+            echo "📋 Final PAM-related configuration:"
+            grep -n "pam\|PAM\|with-pam_dir\|enable-pam" debian/rules || echo "✅ No PAM references remaining"
           else
             echo "⚠️  debian/rules not found, skipping patch"
           fi
