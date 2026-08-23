@@ -28,7 +28,8 @@ docker pull rkhoja/vulcan-slurm:slurmdbd-24-11-6-1
 ### Required Volumes
 
 1. **Munge Key** - `/etc/munge/.secret/munge.key` (read-only)
-2. **Database Config** - `/etc/slurm/slurmdbd.conf` (read-only, 600 permissions)
+2. **Database Config** - `/etc/slurm/slurmdbd.conf` (read-only, 600 permissions managed on the NFS side)
+3. **JWT Key** - `/var/spool/slurmctld` (read-only, optional; required for `AuthAltTypes=auth/jwt` in `slurmdbd.conf`, which the `slurmdb/*` REST endpoints depend on)
 
 ### Database Backend
 
@@ -45,10 +46,11 @@ kubectl apply -f slurmdbd/slurmdbd.yaml
 ## ⚙️ Startup Behavior
 
 On startup, the container:
-1. Sets proper permissions on `slurmdbd.conf` (600, owned by slurm user)
-2. Starts Munge service
-3. Runs slurmdbd with flags: `-Dvs`
-4. Auto-initializes database schema on first connection
+1. Starts Munge service
+2. Runs slurmdbd in the foreground with flags: `-Dvs`
+3. Auto-initializes database schema on first connection
+
+**⚠️ Major version upgrades:** the first start of a new major version runs a **one-way database schema conversion** that can take several minutes on large accounting databases. Always take a `mysqldump` first, and never kill the pod mid-conversion (the generous startup probe in the example manifest budgets for this - remove probes entirely for very large migrations and watch the logs to completion).
 
 ## 📝 Configuration Example
 

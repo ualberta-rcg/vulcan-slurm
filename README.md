@@ -52,8 +52,8 @@ Each container includes:
 * **Munge** authentication daemon for secure inter-service communication
 * **SSSD/LDAP** support for user authentication and directory services
 * **OpenMPI** and PMIx libraries for MPI job support
-* **Python 3** with `slurm_jobscripts.py` for advanced job management
-* **Email notification** via msmtp (configured for U of A SMTP)
+* **Python 3** with `slurm_jobscripts.py` (vendored in this repo) for uploading job scripts to a [TrailblazingTurtle](https://github.com/guilbaults/TrailblazingTurtle) portal, with `[jobscripts]`-prefixed stdout logging and upload retries
+* **Email notification** via msmtp (generic image; set `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM` env vars at deploy time)
 * Standardized user accounts:
   * `slurm` (UID 999) - Slurm service user
   * `munge` (UID 972) - Munge authentication user
@@ -79,24 +79,28 @@ This repository uses a **two-stage automated build process**:
 
 #### Stage 2: Docker Image Building (`build-push-workflow.yml`)
 
-1. **Detects Slurm version** (latest from GitHub API or manual override)
-2. **Verifies DEBs exist** - requires matching DEB packages in `slurm-debs/` directory
-3. **Builds all three Docker images** in sequence:
+1. **Fails fast** if the Docker Hub variables/secret are not configured
+2. **Detects Slurm version** (manual override, or the newest version with DEBs committed in `slurm-debs/`)
+3. **Verifies DEBs exist** - requires matching DEB packages in `slurm-debs/` directory
+4. **Builds all three Docker images in parallel** (matrix job):
+   - Debug-symbol (`*-dbgsym*`) packages are never installed
    - Each Dockerfile filters which DEB packages to install:
      - `slurmctld`: Excludes `slurmdbd`, `slurmd`, `slurmrestd` packages
-     - `slurmdbd`: Excludes `slurmctld`, `slurmrestd` packages
+     - `slurmdbd`: Excludes `slurmctld`, `slurmrestd`, `slurmd` packages
      - `slurmrestd`: Excludes `slurmdbd`, `slurmd`, `slurmctld` packages
-4. **Tags each image** with:
+5. **Tags each image** with:
    - Service tag: `slurmctld`, `slurmdbd`, `slurmrestd` (latest)
-   - Version tag: `slurmctld-24-11-6-1`, `slurmdbd-24-11-6-1`, etc.
-5. **Pushes to Docker Hub**
+   - Version tag: `slurmctld-26-05-3-1`, `slurmdbd-26-05-3-1`, etc.
+6. **Pushes to Docker Hub** and **verifies every pushed tag** with `docker buildx imagetools inspect`, writing a summary with digests and image sizes
+
+The workflow also runs automatically on any push to `main` that touches the image sources (`slurmctld/`, `slurmdbd/`, `slurmrestd/` or the workflow itself), and superseded runs are cancelled.
 
 ### Weekly Automated Builds
 
 The **Weekly Orchestrator** (`weekly-orchestrator.yml`) automatically runs **every Monday at 2:00 AM UTC**:
 
 1. Triggers DEB package build workflow (Stage 1)
-2. Waits 15 minutes for DEB build to complete
+2. Polls that run until it actually completes (up to 75 minutes) and **stops if it failed** - a slow or broken DEB build can no longer be silently skipped
 3. Triggers Docker image build workflow (Stage 2)
 
 This ensures Docker images stay up-to-date with the latest Slurm releases automatically.
@@ -142,25 +146,41 @@ To enable pushing to Docker Hub:
 
 ### Kubernetes
 
-Example Kubernetes configurations are provided in each service directory:
+Production-style example configurations (sanitized: documentation IPs and `example.org` hostnames) are provided in each service directory:
 
 ```bash
-kubectl apply -f slurmctld/slurmctld.yaml
+kubectl apply -f slurmctld/slurmctld-prod.yaml
 kubectl apply -f slurmdbd/slurmdbd.yaml
 kubectl apply -f slurmrestd/slurmrestd.yaml
 ```
+
+### High Availability Layout
+
+`slurmctld-prod.yaml` deploys **three controller Deployments** (primary + two backups) behind three stable LoadBalancer IPs, matching three ordered `SlurmctldHost=` lines in `slurm.conf`:
+
+```conf
+SlurmctldHost=slurmctld-1(192.0.2.15)
+SlurmctldHost=slurmctld-2(192.0.2.16)
+SlurmctldHost=slurmctld-3(192.0.2.17)
+```
+
+Only one controller is active at a time; the backups watch the shared `StateSaveLocation` heartbeat on NFS and take over after `SlurmctldTimeout`. Do **not** put multiple hosts on a single comma-separated `SlurmctldHost` line - that never establishes a primary/backup order.
+
+All Deployments use `strategy: Recreate` on purpose: a RollingUpdate would briefly run two copies of the same controller against the same state directory during image bumps. The manifests also include liberal resource requests/limits and TCP startup/liveness/readiness probes for each daemon.
 
 ### Required Configuration
 
 All containers require:
 - **Munge key**: Mount at `/etc/munge/.secret/munge.key`
 - **Slurm config**: Mount `slurm.conf` at `/etc/slurm/slurm.conf`
-- **Database config** (slurmctld): Mount `slurmdbd.conf` at `/etc/slurm/slurmdbd.conf`
-- **SSSD config** (if using LDAP): Mount at `/etc/sssd/`
+- **Database config** (slurmdbd): Mount `slurmdbd.conf` at `/etc/slurm/slurmdbd.conf`
+- **State directory** (slurmctld): Mount the shared `StateSaveLocation` at `/var/spool/slurmctld` (read-write; also mounted read-only by slurmdbd for the JWT key)
+- **SSSD config** (if using LDAP): Mount `sssd.conf` at `/etc/sssd/.secret/`
+- **Mail relay** (slurmctld, optional): Set `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM` env vars
 
 ## 🔧 Service Details
 
-- **[slurmctld](./slurmctld/README.md)**: Requires `slurmdbd` running. Auto-generates JWT key. Runs `slurm_jobscripts.py`.
+- **[slurmctld](./slurmctld/README.md)**: Requires `slurmdbd` running (waits up to 120s). Auto-generates JWT key on brand-new clusters. Runs `slurm_jobscripts.py`.
 - **[slurmdbd](./slurmdbd/README.md)**: Requires MySQL/MariaDB backend (configure in `slurmdbd.conf`).
 - **[slurmrestd](./slurmrestd/README.md)**: JWT authentication. RESTful API on port 6820.
 

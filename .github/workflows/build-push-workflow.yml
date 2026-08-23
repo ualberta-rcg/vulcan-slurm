@@ -1,3 +1,18 @@
+# =============================================================================
+# Build and Push Docker Images
+# =============================================================================
+# Builds the three Slurm service images (slurmctld/slurmdbd/slurmrestd) from
+# the DEBs committed in slurm-debs/ and pushes them to Docker Hub.
+#
+# Triggers:
+#   - workflow_dispatch: manual run, optionally pinning a version
+#   - push to main touching image sources: automatic rebuild
+#   - weekly-orchestrator.yml dispatches it after a successful DEB build
+#
+# Version selection: explicit override wins; otherwise the newest version
+# that actually has DEBs committed in slurm-debs/ is built. The repo can only
+# ever build what it has DEBs for, so upstream tags are never consulted here.
+# =============================================================================
 name: Build and Push Docker Images
 
 on:
@@ -16,19 +31,35 @@ on:
       - 'slurmdbd/**'
       - 'slurmrestd/**'
       - '.github/workflows/build-push-workflow.yml'
-  pull_request:
-    branches:
-      - main
-      
+
+# A newer run supersedes an older one for the same ref
+concurrency:
+  group: build-push-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-scan-remediate-push:
-    name: Build and Push All Slurm Services
+  preflight:
+    name: 🎯 Preflight & Version Detection
     runs-on: ubuntu-latest
-
-    env:
-      DOCKER_REPO: ${{ vars.DOCKER_HUB_REPO }}
-
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      deb_version: ${{ steps.vars.outputs.deb_version }}
+      skip_build: ${{ steps.version-check.outputs.skip_build }}
     steps:
+      - name: 🛡️ Fail fast if Docker Hub credentials are not configured
+        run: |
+          MISSING=""
+          [ -z "${{ vars.DOCKER_HUB_REPO }}" ] && MISSING="$MISSING vars.DOCKER_HUB_REPO"
+          [ -z "${{ vars.DOCKER_HUB_USER }}" ] && MISSING="$MISSING vars.DOCKER_HUB_USER"
+          [ -z "${{ secrets.DOCKER_HUB_TOKEN }}" ] && MISSING="$MISSING secrets.DOCKER_HUB_TOKEN"
+          if [ -n "$MISSING" ]; then
+            echo "❌ Missing required repository configuration:$MISSING"
+            echo "   Set them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "✅ Docker Hub configuration present."
+
       - name: 🛠️ Checkout Repository
         uses: actions/checkout@v4
 
@@ -36,11 +67,7 @@ jobs:
         id: vars
         run: |
           set -e # Exit on error
-          
-          # Install jq for JSON parsing
-          sudo apt-get update
-          sudo apt-get install -y jq curl
-          
+
           # Check if this is a manual dispatch with version override
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}" ]; then
             echo "✅ Using manual dispatch version override: ${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}"
@@ -67,10 +94,10 @@ jobs:
             VERSION=$(echo "$LATEST_DEB" | tr '.-' '--')
             echo "🔬 Newest DEB version present: $LATEST_DEB (tag format: $VERSION)"
           fi
-          
+
           # Convert version format for deb file matching (e.g., 24-11-5-1 -> 24.11.5-1)
           DEB_VERSION=$(echo "$VERSION" | sed 's/^\([0-9]*\)-\([0-9]*\)-\([0-9]*\)-\([0-9]*\)$/\1.\2.\3-\4/')
-          
+
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "deb_version=${DEB_VERSION}" >> $GITHUB_OUTPUT
 
@@ -107,56 +134,70 @@ jobs:
           echo "   No DEB files found for Slurm version ${{ steps.vars.outputs.version }}"
           echo "   Please ensure DEB packages are built first using the build-and-commit-slurm-debs workflow"
 
-      - name: 🐳 Build and Push slurmctld
-        if: steps.version-check.outputs.skip_build == 'false'
-        run: |
-          echo "🔨 Building slurmctld..."
-          
-          # Copy DEB files for this service
-          cp -v slurm-debs/*${{ steps.vars.outputs.deb_version }}*.deb ./slurmctld/
-          
-          # Build with dual tags
-          cd slurmctld
-          docker build -t $DOCKER_REPO:slurmctld .
-          docker build -t $DOCKER_REPO:slurmctld-${{ steps.vars.outputs.version }} .
-          
-          # Login and push both tags
-          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ vars.DOCKER_HUB_USER }}" --password-stdin
-          docker push $DOCKER_REPO:slurmctld
-          docker push $DOCKER_REPO:slurmctld-${{ steps.vars.outputs.version }}
+  build-push:
+    name: 🐳 Build & Push ${{ matrix.service }}
+    needs: preflight
+    if: needs.preflight.outputs.skip_build == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [slurmctld, slurmdbd, slurmrestd]
+    env:
+      DOCKER_REPO: ${{ vars.DOCKER_HUB_REPO }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      DEB_VERSION: ${{ needs.preflight.outputs.deb_version }}
+    steps:
+      - name: 🛠️ Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: 🐳 Build and Push slurmdbd
-        if: steps.version-check.outputs.skip_build == 'false'
+      - name: 📦 Stage DEB files for ${{ matrix.service }}
         run: |
-          echo "🔨 Building slurmdbd..."
-          
-          # Copy DEB files for this service
-          cp -v slurm-debs/*${{ steps.vars.outputs.deb_version }}*.deb ./slurmdbd/
-          
-          # Build with dual tags
-          cd slurmdbd
-          docker build -t $DOCKER_REPO:slurmdbd .
-          docker build -t $DOCKER_REPO:slurmdbd-${{ steps.vars.outputs.version }} .
-          
-          # Login and push both tags
-          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ vars.DOCKER_HUB_USER }}" --password-stdin
-          docker push $DOCKER_REPO:slurmdbd
-          docker push $DOCKER_REPO:slurmdbd-${{ steps.vars.outputs.version }}
+          # Copy only the version-matched, non-debug DEBs into the build
+          # context. (The Dockerfiles also exclude dbgsym as a second line of
+          # defense.)
+          find slurm-debs -maxdepth 1 -name "*_${DEB_VERSION}_*.deb" ! -name "*dbgsym*" \
+            -exec cp -v {} ./${{ matrix.service }}/ \;
+          ls -lh ./${{ matrix.service }}/*.deb
 
-      - name: 🐳 Build and Push slurmrestd
-        if: steps.version-check.outputs.skip_build == 'false'
+      - name: 🔑 Docker Hub Login
         run: |
-          echo "🔨 Building slurmrestd..."
-          
-          # Copy DEB files for this service
-          cp -v slurm-debs/*${{ steps.vars.outputs.deb_version }}*.deb ./slurmrestd/
-          
-          # Build with dual tags
-          cd slurmrestd
-          docker build -t $DOCKER_REPO:slurmrestd .
-          docker build -t $DOCKER_REPO:slurmrestd-${{ steps.vars.outputs.version }} .
-          
-          # Login and push both tags
           echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ vars.DOCKER_HUB_USER }}" --password-stdin
-          docker push $DOCKER_REPO:slurmrestd
-          docker push $DOCKER_REPO:slurmrestd-${{ steps.vars.outputs.version }}
+
+      - name: 🐳 Build and Push ${{ matrix.service }}
+        run: |
+          echo "🔨 Building ${{ matrix.service }}..."
+          cd ${{ matrix.service }}
+          docker build -t $DOCKER_REPO:${{ matrix.service }} .
+          docker tag $DOCKER_REPO:${{ matrix.service }} $DOCKER_REPO:${{ matrix.service }}-$VERSION
+          docker push $DOCKER_REPO:${{ matrix.service }}
+          docker push $DOCKER_REPO:${{ matrix.service }}-$VERSION
+
+  verify:
+    name: 🔍 Verify Pushed Tags
+    needs: [preflight, build-push]
+    if: needs.preflight.outputs.skip_build == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DOCKER_REPO: ${{ vars.DOCKER_HUB_REPO }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - name: 🔍 Inspect pushed tags and write summary
+        run: |
+          echo "## Pushed images (Slurm ${VERSION})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | Digest | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|------|" >> $GITHUB_STEP_SUMMARY
+          for svc in slurmctld slurmdbd slurmrestd; do
+            for tag in "$svc" "$svc-$VERSION"; do
+              # Fails the job if the tag does not exist on Docker Hub
+              docker buildx imagetools inspect "$DOCKER_REPO:$tag" > /tmp/inspect.txt
+              DIGEST=$(awk '/^Digest:/{print $2}' /tmp/inspect.txt)
+              SIZE=$(curl -s "https://hub.docker.com/v2/repositories/$DOCKER_REPO/tags/$tag" \
+                | python3 -c "import json,sys; d=json.load(sys.stdin); print(f\"{d['full_size']/1048576:.1f} MB\")" || echo "n/a")
+              echo "| \`$DOCKER_REPO:$tag\` | \`$DIGEST\` | $SIZE |" >> $GITHUB_STEP_SUMMARY
+            done
+          done
+          echo "✅ All expected tags exist on Docker Hub."

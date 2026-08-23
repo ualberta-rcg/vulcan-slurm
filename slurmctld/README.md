@@ -35,29 +35,34 @@ docker pull rkhoja/vulcan-slurm:slurmctld-24-11-6-1
 
 ## 🔗 Dependencies
 
-**slurmdbd must be running and accessible** - The container waits up to 60 seconds for slurmdbd on startup.
+**slurmdbd must be running and accessible** - The container waits up to 120 seconds for slurmdbd on startup.
 
 ## 🚀 Deployment
 
 ### Kubernetes
 
 ```bash
-kubectl apply -f slurmctld/slurmctld.yaml
+kubectl apply -f slurmctld/slurmctld-prod.yaml
 ```
+
+`slurmctld-prod.yaml` deploys **three controllers** (primary + two backups on stable LoadBalancer IPs) for high availability - see the [main README](../README.md) for the matching `SlurmctldHost` lines and the `strategy: Recreate` rationale.
 
 ## ⚙️ Startup Behavior
 
 On startup, the container:
-1. Generates JWT key at `/var/spool/slurmctld/jwt_hs256.key` (if missing)
-2. Starts Munge and SSSD services
-3. Waits for slurmdbd to become available
-4. Starts `slurm_jobscripts.py` for job management
-5. Runs slurmctld with flags: `-DRvis`
+1. Regenerates `/etc/msmtprc` from `SMTP_HOST`/`SMTP_PORT`/`MAIL_FROM` (if set)
+2. Generates JWT key at `/var/spool/slurmctld/jwt_hs256.key` (only if missing - i.e. brand-new clusters)
+3. Starts Munge and SSSD services
+4. Waits for slurmdbd to become available (up to 120s)
+5. Starts `slurm_jobscripts.py` (logs with a `[jobscripts]` prefix, retries failed uploads)
+6. Runs slurmctld with flags: `-DRvis`
 
 ## 🔧 Customization
 
 **Environment Variables:**
-- `LOG_FILE` - Override log location (default: `/dev/stdout`)
+- `SMTP_HOST` - Mail relay host (image default is a placeholder)
+- `SMTP_PORT` - Mail relay port (default: `25`)
+- `MAIL_FROM` - From address for job notifications
 
 ## 🔍 Troubleshooting
 

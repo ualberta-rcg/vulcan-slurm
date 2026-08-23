@@ -1,3 +1,4 @@
+# --- MetalLB address pool + L2 advertisement for slurmrestd ----------------
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
@@ -5,15 +6,25 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-    - 172.16.254.44-172.16.254.44
-
+    - 192.0.2.18-192.0.2.18
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
   name: slurmrestd-advertisement
   namespace: metallb-system
+spec:
+  ipAddressPools:
+    - slurmrestd-pool
 ---
+# =============================================================================
+# Vulcan Slurm — slurmrestd (REST API, JWT auth)
+# =============================================================================
+# DaemonSet across all mgmt nodes (unchanged layout — works well); one REST
+# endpoint per node behind the LB at 192.0.2.18 (slurmrestd-service,
+# externalTrafficPolicy: Cluster spreads across all pods).
+# Version must track slurmctld/slurmdbd (all three pinned to the same tag).
+# =============================================================================
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -29,58 +40,74 @@ spec:
         app: slurmrestd
     spec:
       hostAliases:
-      - ip: "127.0.0.1"
-        hostnames:
-        - "slurmrestd"
+      - ip: 127.0.0.1
+        hostnames: ["slurmrestd"]
       containers:
       - name: slurmrestd
-        image: rkhoja/slurm:slurmrestd
+        image: rkhoja/vulcan-slurm:slurmrestd-26-05-3-1
         imagePullPolicy: Always
         ports:
         - containerPort: 6820
+          name: 6820tcp
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+        startupProbe:
+          tcpSocket:
+            port: 6820
+          periodSeconds: 10
+          failureThreshold: 18      # up to 3 minutes
+        livenessProbe:
+          tcpSocket:
+            port: 6820
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 6820
+          periodSeconds: 10
+          failureThreshold: 3
         volumeMounts:
         - name: nfs-munge-key
           mountPath: /etc/munge/.secret/
         - name: slurm-config
           mountPath: /etc/slurm
-#        command: ["/bin/bash", "-c"]
-#        args:
-#          - |
-#            tail -f /dev/null
       volumes:
       - name: nfs-munge-key
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/munge
+          server: nfs.example.org
+          path: /exports/slurm/etc/munge
       - name: slurm-config
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/slurm
-      restartPolicy: Always
+          server: nfs.example.org
+          path: /exports/slurm/etc/slurm
 ---
+# --- LoadBalancer service: one REST endpoint behind a stable address -------
 apiVersion: v1
 kind: Service
 metadata:
-  name: slurmrestd-service
-  namespace: slurm
   labels:
     app: slurmrestd-service
+  name: slurmrestd-service
+  namespace: slurm
 spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.0.2.18
+  # Cluster policy spreads requests across all restd pods
+  externalTrafficPolicy: Cluster
+  ports:
+    - name: slurmrestd
+      port: 6820
+      protocol: TCP
+      targetPort: 6820
   selector:
     app: slurmrestd
-  ports:
-  - name: slurmrestd
-    port: 6820
-    protocol: TCP
-    targetPort: 6820
   sessionAffinity: ClientIP
   sessionAffinityConfig:
     clientIP:
-      timeoutSeconds: 10800  # 3 hours
-  type: LoadBalancer
-  loadBalancerIP: 172.16.254.44
-  externalTrafficPolicy: Cluster
-  internalTrafficPolicy: Cluster
-  ipFamilies:
-  - IPv4
-  ipFamilyPolicy: SingleStack
+      timeoutSeconds: 10800

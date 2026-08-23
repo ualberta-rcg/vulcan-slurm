@@ -1,3 +1,12 @@
+# =============================================================================
+# Weekly Slurm Build Orchestrator
+# =============================================================================
+# Every Monday: build DEBs for the latest upstream Slurm release (stage 1),
+# then build+push the Docker images (stage 2). Stage 2 is only dispatched
+# after stage 1 actually finishes successfully - the run is polled to
+# completion instead of the old fixed "sleep 900", which silently skipped a
+# week whenever the DEB build was slow or failed.
+# =============================================================================
 name: Weekly Slurm Build Orchestrator
 
 on:
@@ -6,58 +15,73 @@ on:
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
-  trigger-build-debs:
-    name: Trigger DEB Build
+  orchestrate:
+    name: Build DEBs then Docker Images
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
-      - name: 🚀 Trigger Build DEBs Workflow
+      - name: 🚀 Trigger DEB build and wait for its conclusion
         uses: actions/github-script@v7
         with:
           script: |
-            try {
-              await github.rest.actions.createWorkflowDispatch({
+            const workflow_id = 'build-and-commit-slurm-debs.yml';
+            const startedAt = new Date().toISOString();
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id,
+              ref: context.ref,
+              inputs: {}
+            });
+            console.log('✅ DEB build workflow triggered, waiting for the run to appear...');
+
+            // Find the run this dispatch created (newest run started after us)
+            let run = null;
+            for (let i = 0; i < 24 && !run; i++) {
+              await new Promise(r => setTimeout(r, 5000));
+              const runs = await github.rest.actions.listWorkflowRuns({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                workflow_id: 'build-and-commit-slurm-debs.yml',
-                ref: context.ref,
-                inputs: {}
+                workflow_id,
+                event: 'workflow_dispatch',
+                created: `>=${startedAt}`,
+                per_page: 1
               });
-              console.log('✅ DEB build workflow triggered successfully!');
-            } catch (error) {
-              console.error('❌ Failed to trigger DEB build workflow:', error.message);
-              throw error;
+              run = runs.data.workflow_runs[0] ?? null;
             }
+            if (!run) throw new Error('DEB build run never appeared after dispatch');
+            console.log(`🔍 Watching DEB build run ${run.id} (${run.html_url})`);
 
-  wait-for-debs:
-    name: Wait for DEB Build to Complete
-    needs: trigger-build-debs
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⏳ Wait for DEB Build
-        run: |
-          echo "Waiting 15 minutes for DEB build to complete..."
-          sleep 900
-          echo "DEB build should be complete, proceeding to Docker build..."
+            // Poll to completion (DEB build takes ~10-20 minutes)
+            const deadline = Date.now() + 75 * 60 * 1000;
+            while (Date.now() < deadline) {
+              await new Promise(r => setTimeout(r, 30000));
+              const { data } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+              console.log(`   status=${data.status} conclusion=${data.conclusion ?? '-'}`);
+              if (data.status === 'completed') {
+                if (data.conclusion !== 'success') {
+                  throw new Error(`DEB build finished with conclusion=${data.conclusion} - not dispatching the Docker build`);
+                }
+                console.log('✅ DEB build succeeded.');
+                return;
+              }
+            }
+            throw new Error('Timed out waiting for the DEB build to complete');
 
-  trigger-build-docker:
-    name: Trigger Docker Build
-    needs: [trigger-build-debs, wait-for-debs]
-    runs-on: ubuntu-latest
-    steps:
-      - name: 🚀 Trigger Build Docker Workflow
+      - name: 🚀 Trigger Docker image build
         uses: actions/github-script@v7
         with:
           script: |
-            try {
-              await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'build-push-workflow.yml',
-                ref: context.ref,
-                inputs: {}
-              });
-              console.log('✅ Docker build workflow triggered successfully!');
-            } catch (error) {
-              console.error('❌ Failed to trigger Docker build workflow:', error.message);
-              throw error;
-            }
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build-push-workflow.yml',
+              ref: context.ref,
+              inputs: {}
+            });
+            console.log('✅ Docker build workflow triggered successfully!');

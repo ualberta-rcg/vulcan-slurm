@@ -30,7 +30,7 @@ docker pull rkhoja/vulcan-slurm:slurmrestd-24-11-6-1
 1. **Munge Key** - `/etc/munge/.secret/munge.key` (read-only)
 2. **Slurm Config** - `/etc/slurm/slurm.conf` (read-only)
    - Must have `AuthAltTypes=auth/jwt` enabled
-3. **SSSD Config** - `/etc/sssd/` (read-only, if using LDAP)
+3. **SSSD Config** - `/etc/sssd/.secret/sssd.conf` (read-only, optional; sssd is skipped when not mounted - user resolution happens in slurmctld)
 
 ## 🔗 Dependencies
 
@@ -48,7 +48,7 @@ kubectl apply -f slurmrestd/slurmrestd.yaml
 
 On startup, the container:
 1. Sets environment variables for JWT authentication
-2. Starts SSSD and Munge services
+2. Starts Munge (and SSSD, only when its config is mounted)
 3. Runs slurmrestd with flags: `-f /etc/slurm/slurm.conf -a jwt -v`
 
 **Environment Variables Set:**
@@ -59,23 +59,24 @@ On startup, the container:
 ## 🔧 Customization
 
 **Environment Variables:**
-- `LOG_FILE` - Override log location (default: `/dev/stdout`)
 - `SLURMRESTD_DEBUG` - Debug level (default: `debug`, can be 0-9)
 - `SLURMRESTD_LISTEN` - Listen address (default: `0.0.0.0:6820`)
 
 ## 🌐 API Usage
 
-**Get cluster info:**
+**Mint a token (on the controller):**
 ```bash
-curl http://localhost:6820/slurm/v0.0.39/cluster
+scontrol token lifespan=300 username=<user>
 ```
 
 **With JWT token:**
 ```bash
 curl -H "X-SLURM-USER-NAME: username" \
      -H "X-SLURM-USER-TOKEN: <jwt-token>" \
-     http://localhost:6820/slurm/v0.0.39/jobs
+     http://localhost:6820/slurm/v0.0.44/ping
 ```
+
+**Note:** the `slurmdb/*` endpoints additionally require `AuthAltTypes=auth/jwt` in `slurmdbd.conf` (with the JWT key readable by slurmdbd).
 
 ## 🔍 Troubleshooting
 
@@ -87,7 +88,7 @@ curl -H "X-SLURM-USER-NAME: username" \
 
 **API not accessible:**
 - Verify port 6820 is open
-- Test: `curl http://localhost:6820/slurm/v0.0.39/cluster`
+- Test: `curl -H "X-SLURM-USER-NAME: <user>" -H "X-SLURM-USER-TOKEN: <jwt>" http://localhost:6820/slurm/v0.0.44/ping`
 
 ## 📚 Related Documentation
 

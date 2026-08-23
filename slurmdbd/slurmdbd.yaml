@@ -1,15 +1,48 @@
----
-apiVersion: v1
-kind: Namespace
+# --- MetalLB address pool + L2 advertisement for slurmdbd ------------------
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
 metadata:
-  name: slurm
+  name: slurmdbd-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.0.2.14-192.0.2.14
 ---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: slurmdbd-advertisement
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - slurmdbd-pool
+---
+# =============================================================================
+# Vulcan Slurm — slurmdbd (accounting daemon)
+# =============================================================================
+# Single replica Deployment (converted 2026-08-22 from a DaemonSet that was
+# nodeSelector-pinned to mgmt1). Unpinned: it can run on any mgmt node and
+# reschedule on node failure. Anti-affinity keeps it off nodes that already
+# host a slurmctld pod, so the control plane spreads across mgmt nodes.
+# Clients always reach it via the stable LB IP 192.0.2.14 (slurmdbd-service).
+#
+# strategy: Recreate — never two dbd writers against the accounting DB.
+#
+# UPGRADE NOTE: on a major Slurm version bump the first start runs a one-way
+# DB schema conversion (can take minutes). The generous startupProbe below
+# budgets ~20 min; for very large migrations, remove the probes first, watch
+# the logs to completion, then re-add. ALWAYS mysqldump before a major bump
+# (see /mnt/backups/percona/vulcan-slurm-db/).
+# =============================================================================
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   name: slurmdbd
   namespace: slurm
 spec:
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: slurmdbd
@@ -18,47 +51,92 @@ spec:
       labels:
         app: slurmdbd
     spec:
+      # Prefer a node not already hosting a controller pod.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: slurmctld
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: slurmdbd
-        image: rkhoja/vulcan-slurm:slurmdbd
+        image: rkhoja/vulcan-slurm:slurmdbd-26-05-3-1
         imagePullPolicy: Always
         ports:
         - containerPort: 6819
+          name: 6819tcp
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+          limits:
+            cpu: "4"
+            memory: 8Gi
+        # Generous startup budget for schema conversions on version bumps.
+        startupProbe:
+          tcpSocket:
+            port: 6819
+          periodSeconds: 10
+          failureThreshold: 120     # up to 20 minutes
+        livenessProbe:
+          tcpSocket:
+            port: 6819
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 6819
+          periodSeconds: 10
+          failureThreshold: 3
         volumeMounts:
-        - name: host-slurm
-          mountPath: /etc/slurm
-          readOnly: true
-        - name: host-munge
+        - name: nfs-munge-key
           mountPath: /etc/munge/.secret/
+        - name: slurm-config
+          mountPath: /etc/slurm
+        # Read-only view of the controller state dir, ONLY for the JWT signing
+        # key (jwt_hs256.key). Required for AuthAltTypes=auth/jwt in
+        # slurmdbd.conf, which the slurmdb/* REST endpoints depend on.
+        - name: slurmctld-state
+          mountPath: /var/spool/slurmctld
           readOnly: true
       volumes:
-      - name: host-slurm
-        hostPath:
-          path: /etc/slurm
-          type: Directory
-      - name: host-munge
-        hostPath:
-          path: /etc/munge/
-          type: Directory
-      restartPolicy: Always
+      - name: nfs-munge-key
+        nfs:
+          server: nfs.example.org
+          path: /exports/slurm/etc/munge
+      - name: slurm-config
+        nfs:
+          server: nfs.example.org
+          path: /exports/slurm/etc/slurm
+      - name: slurmctld-state
+        nfs:
+          server: nfs.example.org
+          path: /exports/slurm/var/spool/slurmctld
 ---
+# --- LoadBalancer service: stable address for AccountingStorageHost --------
 apiVersion: v1
 kind: Service
 metadata:
+  labels:
+    app: slurmdbd-service
   name: slurmdbd-service
   namespace: slurm
-  labels:
-    app: slurmdbd
 spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.0.2.14
+  externalTrafficPolicy: Local
+  ports:
+    - name: slurmdbd
+      port: 6819
+      protocol: TCP
+      targetPort: 6819
   selector:
     app: slurmdbd
-  ports:
-  - name: slurmdbd
-    port: 6819
-    protocol: TCP
-    targetPort: 6819
   sessionAffinity: ClientIP
   sessionAffinityConfig:
     clientIP:
-      timeoutSeconds: 10800  # 3 hours
-  type: ClusterIP
+      timeoutSeconds: 10800

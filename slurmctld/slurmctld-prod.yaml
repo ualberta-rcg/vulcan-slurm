@@ -1,3 +1,4 @@
+# --- MetalLB address pool + L2 advertisement for the three controllers -----
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
@@ -5,15 +6,34 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-    - 172.16.254.41-172.16.254.43
-
+    - 192.0.2.15-192.0.2.17
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
   name: slurmctld-advertisement
   namespace: metallb-system
+spec:
+  ipAddressPools:
+    - slurmctld-pool
 ---
+# =============================================================================
+# Vulcan Slurm — slurmctld controllers (3x: primary + 2 backups)
+# =============================================================================
+# HA model (matches slurm.conf on NFS, three ordered SlurmctldHost lines):
+#   slurmctld-1 (192.0.2.15) = primary
+#   slurmctld-2 (192.0.2.16) = backup1   (takes over after SlurmctldTimeout=120s)
+#   slurmctld-3 (192.0.2.17) = backup2
+# Only ONE controller is ever active; backups idle in standby watching the
+# shared NFS StateSaveLocation heartbeat. This replaces the old broken
+# "comma-separated SlurmctldHost" setup that allowed concurrent state writers
+# (lost jobs / reconfig segfaults).
+#
+# strategy: Recreate is REQUIRED — RollingUpdate would briefly run two copies
+# of the same controller against the same NFS state dir on every image bump.
+#
+# Image is version-pinned; bump deliberately (dbd first on major upgrades).
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,6 +41,8 @@ metadata:
   namespace: slurm
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: slurmctld
@@ -32,7 +54,7 @@ spec:
         instance: "1"
     spec:
       hostname: slurmctld-1
-      # Try scheduling this Pod on a different node from the other slurmctld pods:
+      # Spread the controllers across different mgmt nodes when possible.
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -44,10 +66,45 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: slurmctld
-        image: rkhoja/slurm:slurmctld  # Adjust image as needed
+        image: rkhoja/vulcan-slurm:slurmctld-26-05-3-1
         imagePullPolicy: Always
+        # Mail relay for job notifications; the image ships placeholders and
+        # the entrypoint regenerates /etc/msmtprc from these at start.
+        env:
+        - name: SMTP_HOST
+          value: smtp.example.org
+        - name: SMTP_PORT
+          value: "25"
+        - name: MAIL_FROM
+          value: slurm-alerts@example.org
         ports:
         - containerPort: 6817
+          name: 6817tcp
+          protocol: TCP
+        # Liberal requests/limits — the controller is the cluster brain.
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "8"
+            memory: 16Gi
+        # Startup: state recovery on a big job_state can take minutes.
+        startupProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 10
+          failureThreshold: 30      # up to 5 minutes to come up
+        livenessProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 10
+          failureThreshold: 3
         volumeMounts:
         - name: nfs-munge-key
           mountPath: /etc/munge/.secret/
@@ -56,66 +113,36 @@ spec:
         - name: slurmctld-state
           mountPath: /var/spool/slurmctld
         - name: sssd-config
-          mountPath: /etc/sssd
-        # Uncomment if you need a debug hold:
-        # command: ["/bin/bash", "-c"]
-        # args:
-        #   - |
-        #     tail -f /dev/null
+          mountPath: /etc/sssd/.secret/
       volumes:
       - name: nfs-munge-key
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/munge
+          server: nfs.example.org
+          path: /exports/slurm/etc/munge
       - name: slurm-config
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/slurm
+          server: nfs.example.org
+          path: /exports/slurm/etc/slurm
       - name: slurmctld-state
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/var/spool/slurmctld/
+          server: nfs.example.org
+          path: /exports/slurm/var/spool/slurmctld
       - name: sssd-config
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/sssd
+          server: nfs.example.org
+          path: /exports/slurm/etc/sssd
+      # Controllers and LDAP resolve via stable LB IPs (not pod IPs).
       hostAliases:
-      - ip: "127.0.0.1"
-        hostnames:
-        - "slurmctld-1"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: slurmctld-service-1
-  namespace: slurm
-  labels:
-    app: slurmctld
-    instance: "1"
-spec:
-  selector:
-    app: slurmctld
-    instance: "1"
-  ports:
-  - name: slurmctld
-    port: 6817
-    protocol: TCP
-    targetPort: 6817
-  sessionAffinity: ClientIP
-  sessionAffinityConfig:
-    clientIP:
-      timeoutSeconds: 10800
-  type: LoadBalancer
-  loadBalancerIP: 172.16.254.41
-  externalTrafficPolicy: Local
-  internalTrafficPolicy: Cluster
-  ipFamilies:
-  - IPv4
-  ipFamilyPolicy: SingleStack
-  loadBalancerSourceRanges:
-    - 172.16.254.0/24
-    - 10.42.0.0/16
-    - 10.43.0.0/16
+      - ip: 192.0.2.15
+        hostnames: ["slurmctld-1"]
+      - ip: 192.0.2.16
+        hostnames: ["slurmctld-2"]
+      - ip: 192.0.2.17
+        hostnames: ["slurmctld-3"]
+      - ip: 192.0.2.29
+        hostnames: ["ldap1.example.org"]
+      - ip: 192.0.2.30
+        hostnames: ["ldap2.example.org"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -124,6 +151,8 @@ metadata:
   namespace: slurm
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: slurmctld
@@ -146,10 +175,43 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: slurmctld
-        image: rkhoja/slurm:slurmctld
+        image: rkhoja/vulcan-slurm:slurmctld-26-05-3-1
         imagePullPolicy: Always
+        # Mail relay for job notifications; the image ships placeholders and
+        # the entrypoint regenerates /etc/msmtprc from these at start.
+        env:
+        - name: SMTP_HOST
+          value: smtp.example.org
+        - name: SMTP_PORT
+          value: "25"
+        - name: MAIL_FROM
+          value: slurm-alerts@example.org
         ports:
         - containerPort: 6817
+          name: 6817tcp
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "8"
+            memory: 16Gi
+        startupProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 10
+          failureThreshold: 30
+        livenessProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 10
+          failureThreshold: 3
         volumeMounts:
         - name: nfs-munge-key
           mountPath: /etc/munge/.secret/
@@ -158,61 +220,35 @@ spec:
         - name: slurmctld-state
           mountPath: /var/spool/slurmctld
         - name: sssd-config
-          mountPath: /etc/sssd
+          mountPath: /etc/sssd/.secret/
       volumes:
       - name: nfs-munge-key
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/munge
+          server: nfs.example.org
+          path: /exports/slurm/etc/munge
       - name: slurm-config
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/slurm
+          server: nfs.example.org
+          path: /exports/slurm/etc/slurm
       - name: slurmctld-state
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/var/spool/slurmctld/
+          server: nfs.example.org
+          path: /exports/slurm/var/spool/slurmctld
       - name: sssd-config
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/sssd
+          server: nfs.example.org
+          path: /exports/slurm/etc/sssd
       hostAliases:
-      - ip: "127.0.0.1"
-        hostnames:
-        - "slurmctld-2"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: slurmctld-service-2
-  namespace: slurm
-  labels:
-    app: slurmctld
-    instance: "2"
-spec:
-  selector:
-    app: slurmctld
-    instance: "2"
-  ports:
-  - name: slurmctld
-    port: 6817
-    protocol: TCP
-    targetPort: 6817
-  sessionAffinity: ClientIP
-  sessionAffinityConfig:
-    clientIP:
-      timeoutSeconds: 10800
-  type: LoadBalancer
-  loadBalancerIP: 172.16.254.42
-  externalTrafficPolicy: Local
-  internalTrafficPolicy: Cluster
-  ipFamilies:
-  - IPv4
-  ipFamilyPolicy: SingleStack
-  loadBalancerSourceRanges:
-    - 172.16.254.0/24
-    - 10.42.0.0/16
-    - 10.43.0.0/16
+      - ip: 192.0.2.15
+        hostnames: ["slurmctld-1"]
+      - ip: 192.0.2.16
+        hostnames: ["slurmctld-2"]
+      - ip: 192.0.2.17
+        hostnames: ["slurmctld-3"]
+      - ip: 192.0.2.29
+        hostnames: ["ldap1.example.org"]
+      - ip: 192.0.2.30
+        hostnames: ["ldap2.example.org"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -221,6 +257,8 @@ metadata:
   namespace: slurm
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: slurmctld
@@ -243,10 +281,43 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: slurmctld
-        image: rkhoja/slurm:slurmctld
+        image: rkhoja/vulcan-slurm:slurmctld-26-05-3-1
         imagePullPolicy: Always
+        # Mail relay for job notifications; the image ships placeholders and
+        # the entrypoint regenerates /etc/msmtprc from these at start.
+        env:
+        - name: SMTP_HOST
+          value: smtp.example.org
+        - name: SMTP_PORT
+          value: "25"
+        - name: MAIL_FROM
+          value: slurm-alerts@example.org
         ports:
         - containerPort: 6817
+          name: 6817tcp
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "8"
+            memory: 16Gi
+        startupProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 10
+          failureThreshold: 30
+        livenessProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 6817
+          periodSeconds: 10
+          failureThreshold: 3
         volumeMounts:
         - name: nfs-munge-key
           mountPath: /etc/munge/.secret/
@@ -255,58 +326,126 @@ spec:
         - name: slurmctld-state
           mountPath: /var/spool/slurmctld
         - name: sssd-config
-          mountPath: /etc/sssd
+          mountPath: /etc/sssd/.secret/
       volumes:
       - name: nfs-munge-key
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/munge
+          server: nfs.example.org
+          path: /exports/slurm/etc/munge
       - name: slurm-config
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/slurm
+          server: nfs.example.org
+          path: /exports/slurm/etc/slurm
       - name: slurmctld-state
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/var/spool/slurmctld/
+          server: nfs.example.org
+          path: /exports/slurm/var/spool/slurmctld
       - name: sssd-config
         nfs:
-          server: 172.16.254.10
-          path: /mnt/storage-1/slurm/etc/sssd
+          server: nfs.example.org
+          path: /exports/slurm/etc/sssd
       hostAliases:
-      - ip: "127.0.0.1"
-        hostnames:
-        - "slurmctld-3"
+      - ip: 192.0.2.15
+        hostnames: ["slurmctld-1"]
+      - ip: 192.0.2.16
+        hostnames: ["slurmctld-2"]
+      - ip: 192.0.2.17
+        hostnames: ["slurmctld-3"]
+      - ip: 192.0.2.29
+        hostnames: ["ldap1.example.org"]
+      - ip: 192.0.2.30
+        hostnames: ["ldap2.example.org"]
 ---
+# --- LoadBalancer service for slurmctld-1 (stable IP for SlurmctldHost line 1)
 apiVersion: v1
 kind: Service
 metadata:
-  name: slurmctld-service-3
-  namespace: slurm
   labels:
     app: slurmctld
-    instance: "3"
+    instance: "1"
+  name: slurmctld-service-1
+  namespace: slurm
 spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.0.2.15
+  # Restrict to the cluster networks and the pod/service CIDRs
+  loadBalancerSourceRanges:
+    - 192.0.2.0/24
+    - 10.42.0.0/16
+    - 10.43.0.0/16
+  externalTrafficPolicy: Local
+  ports:
+    - name: slurmctld
+      port: 6817
+      protocol: TCP
+      targetPort: 6817
   selector:
     app: slurmctld
-    instance: "3"
-  ports:
-  - name: slurmctld
-    port: 6817
-    protocol: TCP
-    targetPort: 6817
+    instance: "1"
   sessionAffinity: ClientIP
   sessionAffinityConfig:
     clientIP:
       timeoutSeconds: 10800
+---
+# --- LoadBalancer service for slurmctld-2 (stable IP for SlurmctldHost line 2)
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: slurmctld
+    instance: "2"
+  name: slurmctld-service-2
+  namespace: slurm
+spec:
   type: LoadBalancer
-  loadBalancerIP: 172.16.254.43
-  externalTrafficPolicy: Local
-  internalTrafficPolicy: Cluster
-  ipFamilies:
-  - IPv4
-  ipFamilyPolicy: SingleStack
+  loadBalancerIP: 192.0.2.16
+  # Restrict to the cluster networks and the pod/service CIDRs
   loadBalancerSourceRanges:
-    - 172.16.254.0/24
+    - 192.0.2.0/24
     - 10.42.0.0/16
     - 10.43.0.0/16
+  externalTrafficPolicy: Local
+  ports:
+    - name: slurmctld
+      port: 6817
+      protocol: TCP
+      targetPort: 6817
+  selector:
+    app: slurmctld
+    instance: "2"
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+---
+# --- LoadBalancer service for slurmctld-3 (stable IP for SlurmctldHost line 3)
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: slurmctld
+    instance: "3"
+  name: slurmctld-service-3
+  namespace: slurm
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.0.2.17
+  # Restrict to the cluster networks and the pod/service CIDRs
+  loadBalancerSourceRanges:
+    - 192.0.2.0/24
+    - 10.42.0.0/16
+    - 10.43.0.0/16
+  externalTrafficPolicy: Local
+  ports:
+    - name: slurmctld
+      port: 6817
+      protocol: TCP
+      targetPort: 6817
+  selector:
+    app: slurmctld
+    instance: "3"
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+---
