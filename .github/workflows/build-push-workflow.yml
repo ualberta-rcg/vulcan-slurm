@@ -7,6 +7,15 @@ on:
         description: 'Optional: Specific Slurm version to build (e.g., 24-11-5-1). Leave empty to use latest.'
         required: false
         default: ''
+  # Rebuild automatically when image sources change on main
+  push:
+    branches:
+      - main
+    paths:
+      - 'slurmctld/**'
+      - 'slurmdbd/**'
+      - 'slurmrestd/**'
+      - '.github/workflows/build-push-workflow.yml'
   pull_request:
     branches:
       - main
@@ -37,24 +46,26 @@ jobs:
             echo "✅ Using manual dispatch version override: ${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}"
             VERSION="${{ github.event.inputs.SLURM_VERSION_OVERRIDE }}"
           else
-            echo "🔍 No version override set. Detecting latest stable version..."
-            
-            # Fetch all tags from the SchedMD/slurm repo
-            TAGS=$(curl -s https://api.github.com/repos/SchedMD/slurm/tags | jq -r '.[].name')
+            echo "🔍 No version override set. Using newest version present in slurm-debs/..."
 
-            # Filter for stable release tags (e.g., slurm-23-11-7-1) and get the latest
-            LATEST_TAG=$(echo "$TAGS" \
-            | grep -E '^slurm-[0-9]+-[0-9]+-[0-9]+-[0-9]+$' \
+            # Derive the version from the DEBs committed in this repo rather
+            # than querying SchedMD tags: the repo can only ever build what it
+            # has DEBs for, and this keeps push-triggered rebuilds
+            # deterministic (a brand-new upstream tag without DEBs would
+            # otherwise skip the build).
+            LATEST_DEB=$(find slurm-debs -maxdepth 1 -name 'slurm-smd_*_amd64.deb' \
+            | sed -E 's/.*slurm-smd_([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)_amd64\.deb/\1/' \
             | sort -V \
             | tail -n1)
 
-            if [ -z "$LATEST_TAG" ]; then
-              echo "❌ Could not determine the latest Slurm tag."
+            if [ -z "$LATEST_DEB" ]; then
+              echo "❌ Could not find any slurm-smd DEBs in slurm-debs/."
               exit 1
             fi
 
-            VERSION="${LATEST_TAG#slurm-}"
-            echo "🔬 Detected latest version: $VERSION"
+            # Convert deb version format to tag format (26.05.3-1 -> 26-05-3-1)
+            VERSION=$(echo "$LATEST_DEB" | tr '.-' '--')
+            echo "🔬 Newest DEB version present: $LATEST_DEB (tag format: $VERSION)"
           fi
           
           # Convert version format for deb file matching (e.g., 24-11-5-1 -> 24.11.5-1)
