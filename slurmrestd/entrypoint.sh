@@ -38,7 +38,7 @@ mkdir -p /var/log/slurm /var/run/slurm
 # does run sssd). If the mount is added later this block picks it up.
 
 if [ -f /etc/sssd/.secret/sssd.conf ]; then
-    cp -r /etc/sssd/.secret/* /etc/sssd
+    cp -rL /etc/sssd/.secret/* /etc/sssd
     chmod 700 /etc/sssd
     chmod 600 /etc/sssd/sssd.conf
     chown root:root /etc/sssd /etc/sssd/sssd.conf
