@@ -178,7 +178,8 @@ All containers require:
 - **SSSD config** (if using LDAP): Kubernetes Secret mounted at `/etc/sssd/.secret/` (`kubectl -n slurm create secret generic slurm-sssd-conf --from-file=sssd.conf=...`)
 - **Mail relay** (slurmctld, optional): Set `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM` env vars
 
-See each service README for the exact secret-creation commands.
+See each service README for the exact secret-creation commands, or
+[`secrets-example.yaml`](secrets-example.yaml) for a placeholder manifest.
 
 ## 🔧 Service Details
 
