@@ -4,7 +4,6 @@ import os
 import time
 import argparse
 import logging
-import sys
 
 # This is script is taking the submitted script on the slurmctld server
 # and send it to the userportal so it can be stored in a database
@@ -49,17 +48,6 @@ def send_job(jobid):
 
 
 if __name__ == '__main__':
-
-    # Set up logging to always output to stdout
-    log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-    stdout_handler = logging.StreamHandler(sys.stdout)  # Send logs to stdout
-    stdout_handler.setLevel(logging.DEBUG)  # Capture all logs
-    stdout_handler.setFormatter(log_formatter)
-
-    # Apply the new logging configuration
-    logging.basicConfig(level=logging.DEBUG, handlers=[stdout_handler])
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--config',
@@ -68,11 +56,11 @@ if __name__ == '__main__':
         default='/etc/slurm/slurm_jobscripts.ini')
     parser.add_argument('--verbose', help='Verbose output', action='store_true')
     args = parser.parse_args()
-    
+
     if args.verbose:
-        logging.basicConfig(level=logging.DEBUG, handlers=[stdout_handler])
+        logging.basicConfig(level=logging.DEBUG)
     else:
-        logging.basicConfig(level=logging.INFO, handlers=[stdout_handler])
+        logging.basicConfig(level=logging.INFO)
 
     config = configparser.ConfigParser()
     logging.debug('Reading config file: {}'.format(args.config))
