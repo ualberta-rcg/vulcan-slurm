@@ -1,3 +1,18 @@
+# =============================================================================
+# vulcan-slurm: slurmrestd image (Slurm REST API daemon)
+# =============================================================================
+# Build flow (see .github/workflows/build-push-workflow.yml):
+#   1. The workflow copies the version-matched DEBs from slurm-debs/ into this
+#      directory, so the build context contains *.deb for exactly one version.
+#   2. docker build installs everything except the daemons that belong to the
+#      other images (slurmctld/slurmd/slurmdbd) and -dbgsym debug packages.
+#   3. The image is pushed as <repo>:slurmrestd and <repo>:slurmrestd-<version>.
+#
+# At runtime the container expects (mounted by the k8s DaemonSet):
+#   /etc/slurm              - shared Slurm config
+#   /etc/munge/.secret/     - cluster munge.key
+# =============================================================================
+
 # Base image
 FROM debian:bullseye-slim
 
@@ -78,10 +93,15 @@ COPY *.deb /tmp/
 # DEB INSTALLATION - Standardized across all Slurm services
 # =============================================================================
 
+# Install every DEB from the build context except:
+#   - daemons that belong to the other service images ("slurmd" also covers
+#     slurmdbd by substring)
+#   - *-dbgsym* debug-symbol packages (hundreds of MB, useless at runtime)
+
 SHELL ["/bin/bash", "-c"]
 
 RUN cd /tmp && \
-    EXCLUDE_KEYWORDS=("slurmdbd" "slurmd" "slurmctld") && \
+    EXCLUDE_KEYWORDS=("slurmdbd" "slurmd" "slurmctld" "dbgsym") && \
     ALL_DEBS=($(find ./ -maxdepth 1 -type f -name "*.deb")) && \
     INSTALL_LIST=() && \
     for deb in "${ALL_DEBS[@]}"; do \
@@ -124,7 +144,9 @@ RUN chmod +x /entrypoint.sh && \
 # Expose required ports
 EXPOSE 6820
 
-# Entry point
+# Entry point: entrypoint.sh preps munge then execs slurmrestd with the CMD
+# flags (-f config file, -a jwt auth plugin, -v verbose). The listen address
+# comes from SLURMRESTD_LISTEN set in entrypoint.sh.
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 CMD ["-f", "/etc/slurm/slurm.conf", "-a", "jwt", "-v"]
 

@@ -1,27 +1,24 @@
 #!/bin/bash
+# =============================================================================
+# slurmdbd container entrypoint
+# =============================================================================
+# Prepares munge, then execs slurmdbd in the foreground (k8s owns supervision
+# and log collection). On a major Slurm version bump the first start runs the
+# one-way DB schema conversion - it MUST be allowed to finish uninterrupted,
+# which is why slurmdbd runs in the foreground with no wrapper that could
+# restart or kill it mid-conversion.
+#
+# NOTE: the NFS-mounted config (/etc/slurm) is deliberately NOT chown/chmod'ed
+# here. slurmdbd.conf permissions (600, slurm-owned) are managed on the NFS
+# side; root is squashed by the export anyway, and the old chmod fought with
+# the slurmctld entrypoint over the same files.
+# =============================================================================
 
 # =============================================================================
-# LOG REDIRECTION - Standardized across all Slurm services
+# DIRECTORY SETUP - container-local runtime dirs only
 # =============================================================================
 
-# Redirect logs to stdout and stderr for Kubernetes
-if [ -z "${LOG_FILE}" ] || [ "${LOG_FILE}" = "/var/log/slurm/slurm-dbd.log" ]; then
-  export LOG_FILE=/dev/stdout
-fi
-
-# =============================================================================
-# DIRECTORY SETUP - Standardized across all Slurm services
-# =============================================================================
-
-# slurmdbd-specific configuration
-chown slurm:slurm /etc/slurm/slurmdbd.conf
-chmod 600 /etc/slurm/slurmdbd.conf
-
-# Create required directories for slurmdbd
-mkdir -p /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm
-touch /var/log/slurm/slurm-dbd.log /var/log/slurm/slurmctld.log /var/spool/slurmctld/priority_last_decay_ran
-chown -R slurm:slurm /var/spool/slurmctld /var/spool/slurmd /var/spool/slurmdbd /var/spool/slurmrestd /var/log/slurm/ /var/run/slurm /etc/slurm
-chmod 755 /var/spool/slurmdbd
+mkdir -p /var/log/slurm /var/run/slurm
 
 # =============================================================================
 # MUNGE SETUP - Standardized across all Slurm services
@@ -30,11 +27,9 @@ chmod 755 /var/spool/slurmdbd
 # Create Munge runtime directory
 mkdir -p /run/munge
 
-# Copy Munge key from secrets
+# Copy Munge key from secrets (mounted read-only) into the local etc
 cp /etc/munge/.secret/munge.key /etc/munge/munge.key
-
-# Set proper ownership and permissions
-chown munge:munge -R /etc/munge /run/munge
+chown munge:munge /etc/munge/munge.key /run/munge
 chmod 400 /etc/munge/munge.key
 
 # Start munged daemon in background
@@ -47,5 +42,6 @@ sleep 2
 # SERVICE EXECUTION - Standardized across all Slurm services
 # =============================================================================
 
-# Run slurmdbd as the slurm user
+# Run slurmdbd as the slurm user, in the foreground, with the CMD flags
+# (-D foreground, -v verbose, -s log to stdout)
 exec su -s /bin/bash slurm -c "/usr/sbin/slurmdbd $@"

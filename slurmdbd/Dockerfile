@@ -1,3 +1,19 @@
+# =============================================================================
+# vulcan-slurm: slurmdbd image (Slurm accounting daemon)
+# =============================================================================
+# Build flow (see .github/workflows/build-push-workflow.yml):
+#   1. The workflow copies the version-matched DEBs from slurm-debs/ into this
+#      directory, so the build context contains *.deb for exactly one version.
+#   2. docker build installs everything except the daemons that belong to the
+#      other images (slurmctld/slurmd/slurmrestd) and -dbgsym debug packages.
+#   3. The image is pushed as <repo>:slurmdbd and <repo>:slurmdbd-<version>.
+#
+# At runtime the container expects (mounted by the k8s Deployment):
+#   /etc/slurm              - shared Slurm config (slurmdbd.conf with DB creds)
+#   /etc/munge/.secret/     - cluster munge.key
+#   /var/spool/slurmctld    - read-only, for the JWT key (AuthAltTypes=auth/jwt)
+# =============================================================================
+
 # Base image
 FROM debian:bullseye-slim
 
@@ -73,10 +89,15 @@ COPY *.deb /tmp/
 # DEB INSTALLATION - Standardized across all Slurm services
 # =============================================================================
 
+# Install every DEB from the build context except:
+#   - daemons that belong to the other service images; note "slurmd_" with the
+#     underscore - a plain "slurmd" keyword would also match slurmdbd itself
+#   - *-dbgsym* debug-symbol packages (hundreds of MB, useless at runtime)
+
 SHELL ["/bin/bash", "-c"]
 
 RUN cd /tmp && \
-    EXCLUDE_KEYWORDS=("slurmctld" "slurmrestd") && \
+    EXCLUDE_KEYWORDS=("slurmctld" "slurmrestd" "slurmd_" "dbgsym") && \
     ALL_DEBS=($(find ./ -maxdepth 1 -type f -name "*.deb")) && \
     INSTALL_LIST=() && \
     for deb in "${ALL_DEBS[@]}"; do \
@@ -118,7 +139,8 @@ RUN chmod +x /entrypoint.sh && \
 # Expose required ports
 EXPOSE 6819
 
-# Entry point
+# Entry point: entrypoint.sh preps munge then execs slurmdbd with the CMD
+# flags (-D foreground, -v verbose, -s log to stdout). Foreground execution
+# matters: DB schema conversions on major upgrades must not be interrupted.
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
-#CMD ["-Dvvv", "-s"]
 CMD ["-Dvs"]

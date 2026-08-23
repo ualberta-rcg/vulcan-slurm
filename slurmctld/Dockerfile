@@ -1,3 +1,20 @@
+# =============================================================================
+# vulcan-slurm: slurmctld image (Slurm controller)
+# =============================================================================
+# Build flow (see .github/workflows/build-push-workflow.yml):
+#   1. The workflow copies the version-matched DEBs from slurm-debs/ into this
+#      directory, so the build context contains *.deb for exactly one version.
+#   2. docker build installs everything except the daemons that belong to the
+#      other images (slurmdbd/slurmd/slurmrestd) and the -dbgsym debug packages.
+#   3. The image is pushed as <repo>:slurmctld and <repo>:slurmctld-<version>.
+#
+# At runtime the container expects (mounted by the k8s Deployment):
+#   /etc/slurm              - shared Slurm config (slurm.conf, plugins, ini files)
+#   /etc/munge/.secret/     - cluster munge.key
+#   /etc/sssd/.secret/      - sssd.conf for LDAP user resolution
+#   /var/spool/slurmctld    - shared StateSaveLocation (job state, JWT key)
+# =============================================================================
+
 # Base image
 FROM debian:bullseye-slim
 
@@ -8,6 +25,18 @@ FROM debian:bullseye-slim
 # Set default environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TERM=xterm
+
+# =============================================================================
+# MAIL RELAY CONFIGURATION (build args)
+# =============================================================================
+# The image ships with placeholder values so the public image stays generic.
+# Site-specific values are injected at runtime through the SMTP_HOST /
+# SMTP_PORT / MAIL_FROM environment variables (see entrypoint.sh), or can be
+# baked in for private builds with --build-arg.
+
+ARG SMTP_HOST=smtp.example.org
+ARG SMTP_PORT=25
+ARG MAIL_FROM=slurm-alerts@example.org
 
 # =============================================================================
 # LDAP CONFIGURATION - Standardized across Slurm services that require it
@@ -22,12 +51,15 @@ RUN echo "nslcd nslcd/ldap-uris string ldap://localhost" | debconf-set-selection
 # =============================================================================
 # USER & GROUP SETUP - Standardized across all Slurm services
 # =============================================================================
+# Fixed UIDs/GIDs: these must match the UIDs used on the compute/login nodes
+# and on the NFS exports, because credentials and file ownership cross the
+# container boundary (munge key, StateSaveLocation, config files).
 
 # --- 1. Create Slurm service user (UID 999) ---
 RUN groupadd -g 999 slurm && useradd -u 999 -g 999 -m -s /bin/bash slurm
 
 # --- 2. Create Munge authentication user (UID 972) ---
-RUN groupadd -g 972 munge && useradd -u 972 -g 972 -m -s /sbin/nologin munge 
+RUN groupadd -g 972 munge && useradd -u 972 -g 972 -m -s /sbin/nologin munge
 
 # --- 3. Create wwuser user accounts (UID 2000) ---
 RUN groupadd -g 2000 wwgroup && \
@@ -43,6 +75,9 @@ RUN groupadd -g 2001 distgroup && \
 # =============================================================================
 # PACKAGE INSTALLATION - Standardized across all Slurm services
 # =============================================================================
+# MPI/PMIx libraries satisfy the Slurm DEB dependencies; sssd + libnss-sss
+# provide LDAP user resolution inside the pod; msmtp + mailutils give
+# slurmctld a working MailProg for job mail notifications.
 
 # Install Packages
 RUN apt-get update && apt-get install -y \
@@ -71,11 +106,11 @@ RUN apt-get update && apt-get install -y \
     ca-certificates
 
 # =============================================================================
-# MUNGE SETUP - Standardized across all Slurm services
+# MAIL (msmtp) SETUP
 # =============================================================================
-
-# Install Munge package
-# Note: munge package is already included in the apt-get install above
+# Default msmtp config from the build args above. entrypoint.sh regenerates
+# this file at container start when SMTP_HOST/SMTP_PORT/MAIL_FROM env vars
+# are provided by the Deployment, so one public image serves any site.
 
 RUN cat > /etc/msmtprc <<EOF
 defaults
@@ -86,9 +121,9 @@ tls_trust_file /etc/ssl/certs/ca-certificates.crt
 logfile        /var/log/msmtp.log
 
 account default
-host smtp.ualberta.ca
-port 25
-from vulcan-slurm-alerts@westdri.ca
+host ${SMTP_HOST}
+port ${SMTP_PORT}
+from ${MAIL_FROM}
 EOF
 
 RUN chmod 644 /etc/msmtprc
@@ -96,18 +131,23 @@ RUN chmod 644 /etc/msmtprc
 # Copy all .deb files into the container
 COPY *.deb /tmp/
 
-# Download the latest slurm_jobscripts.py from TrailblazingTurtle
-RUN curl -L -o /usr/local/bin/slurm_jobscripts.py \
-    https://raw.githubusercontent.com/guilbaults/TrailblazingTurtle/main/slurm_jobscripts/slurm_jobscripts.py
+# Job-script collector for the TrailblazingTurtle portal: vendored in this
+# repo (reviewed changes only) instead of curling upstream main at build time,
+# so builds are reproducible.
+COPY slurm_jobscripts.py /usr/local/bin/slurm_jobscripts.py
+RUN chmod 755 /usr/local/bin/slurm_jobscripts.py
 
 # =============================================================================
 # DEB INSTALLATION - Standardized across all Slurm services
 # =============================================================================
+# Install every DEB from the build context except:
+#   - daemons that belong to the other service images (slurmdbd/slurmd/slurmrestd)
+#   - *-dbgsym* debug-symbol packages (hundreds of MB, useless at runtime)
 
 SHELL ["/bin/bash", "-c"]
 
 RUN cd /tmp && \
-    EXCLUDE_KEYWORDS=("slurmdbd" "slurmd" "slurmrestd") && \
+    EXCLUDE_KEYWORDS=("slurmdbd" "slurmd" "slurmrestd" "dbgsym") && \
     ALL_DEBS=($(find ./ -maxdepth 1 -type f -name "*.deb")) && \
     INSTALL_LIST=() && \
     for deb in "${ALL_DEBS[@]}"; do \
@@ -128,13 +168,16 @@ RUN cd /tmp && \
         apt-get install -y "${INSTALL_LIST[@]}"; \
     else \
         echo "No .deb packages to install."; \
-    fi 
+    fi
 
 COPY entrypoint.sh /entrypoint.sh
 
 # =============================================================================
 # CLEANUP - Standardized across all Slurm services
 # =============================================================================
+# The nsswitch edit inserts the "slurm" NSS plugin (shipped with Slurm) ahead
+# of "files" so tools inside the pod can resolve cluster node names, and sssd
+# handles LDAP users via the standard sss entries.
 
 RUN chmod +x /entrypoint.sh && \
     apt-get purge -y \
@@ -150,7 +193,8 @@ RUN chmod +x /entrypoint.sh && \
 # Expose required ports
 EXPOSE 6817
 
-# Entry point
+# Entry point: entrypoint.sh preps munge/sssd/jobscripts then execs
+# slurmctld with the CMD flags (-D foreground, -R recover state, -v verbose,
+# -i ignore versioned plugin errors, -s log to syslog/stdout).
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
-#CMD ["-D", "-R", "-vvv", "-i", "-s"]
 CMD ["-DRvis"]

@@ -1,4 +1,17 @@
 #!/bin/bash
+# =============================================================================
+# slurmrestd container entrypoint
+# =============================================================================
+# Prepares munge (and sssd when configured), then execs slurmrestd in the
+# foreground (k8s owns supervision and log collection). Authentication is
+# JWT-only: users present a token minted by `scontrol token`; the daemon
+# itself talks to slurmctld/slurmdbd with munge.
+#
+# NOTE: the NFS-mounted config (/etc/slurm) is deliberately NOT chown/chmod'ed
+# here - permissions are managed on the NFS side and root is squashed by the
+# export anyway.
+# =============================================================================
+
 # Enable JWT authentication for Slurm REST API
 export SLURM_JWT=daemon
 
@@ -8,34 +21,32 @@ export SLURMRESTD_DEBUG=debug
 # Set authentication type explicitly to JWT (ensure AuthAltTypes=auth/jwt is enabled in slurm.conf)
 export SLURMRESTD_AUTH_TYPES=rest_auth/jwt
 
-# Listen on TCP port 6820 and a UNIX socket for security
+# Listen on TCP port 6820
 export SLURMRESTD_LISTEN="0.0.0.0:6820"
 
 # =============================================================================
-# LOG REDIRECTION - Standardized across all Slurm services
+# DIRECTORY SETUP - container-local runtime dirs only
 # =============================================================================
 
-# Redirect logs to stdout and stderr for Kubernetes
-if [ -z "${LOG_FILE}" ] || [ "${LOG_FILE}" = "/var/log/slurm/slurmrestd.log" ]; then
-  export LOG_FILE=/dev/stdout
+mkdir -p /var/log/slurm /var/run/slurm
+
+# =============================================================================
+# SSSD SETUP - optional, only when a config is mounted
+# =============================================================================
+# The DaemonSet does not currently mount /etc/sssd/.secret/, so sssd is
+# skipped here (REST requests are resolved end-to-end by slurmctld, which
+# does run sssd). If the mount is added later this block picks it up.
+
+if [ -f /etc/sssd/.secret/sssd.conf ]; then
+    cp -r /etc/sssd/.secret/* /etc/sssd
+    chmod 700 /etc/sssd
+    chmod 600 /etc/sssd/sssd.conf
+    chown root:root /etc/sssd /etc/sssd/sssd.conf
+    # -d 1 keeps the pod log readable; raise for LDAP debugging only.
+    /usr/sbin/sssd -i -d 1 &
+else
+    echo "NOTE: /etc/sssd/.secret/sssd.conf not mounted - skipping sssd"
 fi
-
-# =============================================================================
-# DIRECTORY SETUP - Standardized across all Slurm services
-# =============================================================================
-
-# Create required directories for slurmrestd
-mkdir -p /var/spool/slurmd /var/log/slurm/ /var/run/slurm /etc/slurm
-touch /var/log/slurm/slurmrestd.log
-chown -R slurm:slurm /var/spool/slurmd /var/log/slurm/ /var/run/slurm /etc/slurm
-chmod 644 /etc/slurm/*.conf
-
-# =============================================================================
-# SSSD SETUP - Standardized across Slurm services that require it
-# =============================================================================
-
-# Start sssd in the background
-su -s /bin/bash -c "/usr/sbin/sssd -i -d 9 &" root
 
 # =============================================================================
 # MUNGE SETUP - Standardized across all Slurm services
@@ -44,11 +55,9 @@ su -s /bin/bash -c "/usr/sbin/sssd -i -d 9 &" root
 # Create Munge runtime directory
 mkdir -p /run/munge
 
-# Copy Munge key from secrets
+# Copy Munge key from secrets (mounted read-only) into the local etc
 cp /etc/munge/.secret/munge.key /etc/munge/munge.key
-
-# Set proper ownership and permissions
-chown munge:munge -R /etc/munge /run/munge
+chown munge:munge /etc/munge/munge.key /run/munge
 chmod 400 /etc/munge/munge.key
 
 # Start munged daemon in background
@@ -61,5 +70,5 @@ sleep 2
 # SERVICE EXECUTION - Standardized across all Slurm services
 # =============================================================================
 
-# Run slurmrestd as the slurmrest user
+# Run slurmrestd as the unprivileged slurmrest user with the CMD flags
 exec su -s /bin/bash slurmrest -c "slurmrestd $*"
