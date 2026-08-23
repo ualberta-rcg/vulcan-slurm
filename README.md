@@ -171,12 +171,14 @@ All Deployments use `strategy: Recreate` on purpose: a RollingUpdate would brief
 ### Required Configuration
 
 All containers require:
-- **Munge key**: Mount at `/etc/munge/.secret/munge.key`
+- **Munge key**: Kubernetes Secret mounted at `/etc/munge/.secret/munge.key` (`kubectl -n slurm create secret generic slurm-munge-key --from-file=munge.key=...`)
 - **Slurm config**: Mount `slurm.conf` at `/etc/slurm/slurm.conf`
 - **Database config** (slurmdbd): Mount `slurmdbd.conf` at `/etc/slurm/slurmdbd.conf`
 - **State directory** (slurmctld): Mount the shared `StateSaveLocation` at `/var/spool/slurmctld` (read-write; also mounted read-only by slurmdbd for the JWT key)
-- **SSSD config** (if using LDAP): Mount `sssd.conf` at `/etc/sssd/.secret/`
+- **SSSD config** (if using LDAP): Kubernetes Secret mounted at `/etc/sssd/.secret/` (`kubectl -n slurm create secret generic slurm-sssd-conf --from-file=sssd.conf=...`)
 - **Mail relay** (slurmctld, optional): Set `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM` env vars
+
+See each service README for the exact secret-creation commands.
 
 ## 🔧 Service Details
 

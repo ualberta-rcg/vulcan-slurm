@@ -78,10 +78,10 @@ spec:
         - name: slurm-config
           mountPath: /etc/slurm
       volumes:
+      # Cluster munge key from a k8s Secret (see README for creation)
       - name: nfs-munge-key
-        nfs:
-          server: nfs.example.org
-          path: /exports/slurm/etc/munge
+        secret:
+          secretName: slurm-munge-key
       - name: slurm-config
         nfs:
           server: nfs.example.org

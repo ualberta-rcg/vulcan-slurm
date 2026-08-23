@@ -64,10 +64,10 @@ fi
 # =============================================================================
 # SSSD SETUP - Standardized across Slurm services that require it
 # =============================================================================
-# The real sssd.conf is mounted read-only at /etc/sssd/.secret/ (a k8s Secret)
-# and copied with -L to dereference the secret volume symlinks, because sssd
-# into place because sssd requires 0600 root-owned config, which a k8s
-# volume mount cannot guarantee by itself.
+# The real sssd.conf is mounted read-only at /etc/sssd/.secret/ (a k8s
+# Secret) and copied into place because sssd requires 0600 root-owned
+# config, which a volume mount cannot guarantee by itself. -L dereferences
+# the symlinks that Secret volumes use internally.
 
 if [ -f /etc/sssd/.secret/sssd.conf ]; then
     cp -rL /etc/sssd/.secret/* /etc/sssd

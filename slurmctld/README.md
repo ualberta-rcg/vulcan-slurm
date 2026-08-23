@@ -27,11 +27,29 @@ docker pull rkhoja/vulcan-slurm:slurmctld-24-11-6-1
 
 ### Required Volumes
 
-1. **Munge Key** - `/etc/munge/.secret/munge.key` (read-only)
+1. **Munge Key** - `/etc/munge/.secret/munge.key` (k8s Secret, read-only)
 2. **Slurm Config** - `/etc/slurm/slurm.conf` (read-only)
 3. **Database Config** - `/etc/slurm/slurmdbd.conf` (read-only)
 4. **State Directory** - `/var/spool/slurmctld` (read-write, persistent)
-5. **SSSD Config** - `/etc/sssd/` (read-only, if using LDAP)
+5. **SSSD Config** - `/etc/sssd/.secret/sssd.conf` (k8s Secret, read-only, if using LDAP)
+
+### Creating the Secrets
+
+The munge key and `sssd.conf` (which contains LDAP bind credentials) are
+mounted from Kubernetes Secrets - they are the only credential material the
+pods need and they never touch a shared filesystem:
+
+```bash
+kubectl -n slurm create secret generic slurm-munge-key \
+  --from-file=munge.key=/path/to/munge.key
+
+kubectl -n slurm create secret generic slurm-sssd-conf \
+  --from-file=sssd.conf=/path/to/sssd.conf
+```
+
+The example manifest (`slurmctld-prod.yaml`) mounts them at
+`/etc/munge/.secret/` and `/etc/sssd/.secret/`; the entrypoint copies them
+into place with the ownership/permissions each daemon demands.
 
 ## 🔗 Dependencies
 

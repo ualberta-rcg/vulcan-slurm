@@ -115,10 +115,10 @@ spec:
         - name: sssd-config
           mountPath: /etc/sssd/.secret/
       volumes:
+      # Cluster munge key from a k8s Secret (see README for creation)
       - name: nfs-munge-key
-        nfs:
-          server: nfs.example.org
-          path: /exports/slurm/etc/munge
+        secret:
+          secretName: slurm-munge-key
       - name: slurm-config
         nfs:
           server: nfs.example.org
@@ -127,10 +127,10 @@ spec:
         nfs:
           server: nfs.example.org
           path: /exports/slurm/var/spool/slurmctld
+      # sssd.conf (LDAP bind credentials) from a k8s Secret
       - name: sssd-config
-        nfs:
-          server: nfs.example.org
-          path: /exports/slurm/etc/sssd
+        secret:
+          secretName: slurm-sssd-conf
       # Controllers and LDAP resolve via stable LB IPs (not pod IPs).
       hostAliases:
       - ip: 192.0.2.15
@@ -222,10 +222,10 @@ spec:
         - name: sssd-config
           mountPath: /etc/sssd/.secret/
       volumes:
+      # Cluster munge key from a k8s Secret (see README for creation)
       - name: nfs-munge-key
-        nfs:
-          server: nfs.example.org
-          path: /exports/slurm/etc/munge
+        secret:
+          secretName: slurm-munge-key
       - name: slurm-config
         nfs:
           server: nfs.example.org
@@ -234,10 +234,10 @@ spec:
         nfs:
           server: nfs.example.org
           path: /exports/slurm/var/spool/slurmctld
+      # sssd.conf (LDAP bind credentials) from a k8s Secret
       - name: sssd-config
-        nfs:
-          server: nfs.example.org
-          path: /exports/slurm/etc/sssd
+        secret:
+          secretName: slurm-sssd-conf
       hostAliases:
       - ip: 192.0.2.15
         hostnames: ["slurmctld-1"]
@@ -328,10 +328,10 @@ spec:
         - name: sssd-config
           mountPath: /etc/sssd/.secret/
       volumes:
+      # Cluster munge key from a k8s Secret (see README for creation)
       - name: nfs-munge-key
-        nfs:
-          server: nfs.example.org
-          path: /exports/slurm/etc/munge
+        secret:
+          secretName: slurm-munge-key
       - name: slurm-config
         nfs:
           server: nfs.example.org
@@ -340,10 +340,10 @@ spec:
         nfs:
           server: nfs.example.org
           path: /exports/slurm/var/spool/slurmctld
+      # sssd.conf (LDAP bind credentials) from a k8s Secret
       - name: sssd-config
-        nfs:
-          server: nfs.example.org
-          path: /exports/slurm/etc/sssd
+        secret:
+          secretName: slurm-sssd-conf
       hostAliases:
       - ip: 192.0.2.15
         hostnames: ["slurmctld-1"]

@@ -27,9 +27,19 @@ docker pull rkhoja/vulcan-slurm:slurmdbd-24-11-6-1
 
 ### Required Volumes
 
-1. **Munge Key** - `/etc/munge/.secret/munge.key` (read-only)
+1. **Munge Key** - `/etc/munge/.secret/munge.key` (k8s Secret, read-only)
 2. **Database Config** - `/etc/slurm/slurmdbd.conf` (read-only, 600 permissions managed on the NFS side)
 3. **JWT Key** - `/var/spool/slurmctld` (read-only, optional; required for `AuthAltTypes=auth/jwt` in `slurmdbd.conf`, which the `slurmdb/*` REST endpoints depend on)
+
+### Creating the Secret
+
+```bash
+kubectl -n slurm create secret generic slurm-munge-key \
+  --from-file=munge.key=/path/to/munge.key
+```
+
+The example manifest mounts it at `/etc/munge/.secret/`; the entrypoint
+copies the key into place with munge's required ownership and permissions.
 
 ### Database Backend
 

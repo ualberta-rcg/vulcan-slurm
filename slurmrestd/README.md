@@ -27,10 +27,17 @@ docker pull rkhoja/vulcan-slurm:slurmrestd-24-11-6-1
 
 ### Required Volumes
 
-1. **Munge Key** - `/etc/munge/.secret/munge.key` (read-only)
+1. **Munge Key** - `/etc/munge/.secret/munge.key` (k8s Secret, read-only)
 2. **Slurm Config** - `/etc/slurm/slurm.conf` (read-only)
    - Must have `AuthAltTypes=auth/jwt` enabled
-3. **SSSD Config** - `/etc/sssd/.secret/sssd.conf` (read-only, optional; sssd is skipped when not mounted - user resolution happens in slurmctld)
+3. **SSSD Config** - `/etc/sssd/.secret/sssd.conf` (k8s Secret, read-only, optional; sssd is skipped when not mounted - user resolution happens in slurmctld)
+
+### Creating the Secret
+
+```bash
+kubectl -n slurm create secret generic slurm-munge-key \
+  --from-file=munge.key=/path/to/munge.key
+```
 
 ## 🔗 Dependencies
 
