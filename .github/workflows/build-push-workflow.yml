@@ -38,15 +38,7 @@ on:
       - 'slurmctld/**'
       - 'slurmdbd/**'
       - 'slurmrestd/**'
-      - 'slurm-debs/**'
       - '.github/workflows/build-push-workflow.yml'
-
-# Suite selection: dispatch input wins; push/schedule events default to trixie.
-# The suite picks which DEBs are staged (filename suffix), the base image
-# (--build-arg), and the Docker Hub tag names, so per-suite tags never
-# overwrite each other.
-env:
-  SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
 
 # A newer run supersedes an older one for the same ref
 concurrency:
@@ -58,6 +50,8 @@ jobs:
     name: 🎯 Preflight & Version Detection
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
     outputs:
       version: ${{ steps.vars.outputs.version }}
       deb_version: ${{ steps.vars.outputs.deb_version }}
@@ -102,15 +96,7 @@ jobs:
             | tail -n1)
 
             if [ -z "$LATEST_DEB" ]; then
-              ANY_DEB=$(find slurm-debs -maxdepth 1 -name 'slurm-smd_*_amd64*.deb' | wc -l || true)
-              if [ "$ANY_DEB" -gt 0 ]; then
-                echo "🚫 No slurm-smd DEBs for suite '${SUITE}' yet (other suites exist)."
-                echo "skip_build=true" >> $GITHUB_OUTPUT
-                echo "version=none" >> $GITHUB_OUTPUT
-                echo "deb_version=none" >> $GITHUB_OUTPUT
-                exit 0
-              fi
-              echo "❌ Could not find any slurm-smd DEBs in slurm-debs/."
+              echo "❌ Could not find any slurm-smd DEBs for suite '${SUITE}' in slurm-debs/."
               exit 1
             fi
 
@@ -173,6 +159,7 @@ jobs:
       DOCKER_REPO: ${{ vars.DOCKER_HUB_REPO }}
       VERSION: ${{ needs.preflight.outputs.version }}
       DEB_VERSION: ${{ needs.preflight.outputs.deb_version }}
+      SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
     steps:
       - name: 🛠️ Checkout Repository
         uses: actions/checkout@v4
@@ -209,6 +196,7 @@ jobs:
     env:
       DOCKER_REPO: ${{ vars.DOCKER_HUB_REPO }}
       VERSION: ${{ needs.preflight.outputs.version }}
+      SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
     steps:
       - name: 🔍 Inspect pushed tags and write summary
         run: |
