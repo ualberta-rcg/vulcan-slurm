@@ -64,9 +64,7 @@ RUN groupadd -g 2001 distgroup && \
 # Install Packages
 RUN apt-get update && apt-get install -y \
     libpmix-dev \
-    libpmix2 \
     libopenmpi-dev \
-    libopenmpi3 \
     openmpi-bin \
     mailutils \
     curl \
