@@ -84,6 +84,7 @@ jobs:
       - name: 🔨 Build Plugin
         run: |
           set -e
+          set -o pipefail
           # Surface the real failure via annotations: logs need auth, these don't.
           if [ ! -f /usr/include/slurm/spank.h ]; then
             echo "::error::spank.h missing — slurm-smd-dev did not install"
