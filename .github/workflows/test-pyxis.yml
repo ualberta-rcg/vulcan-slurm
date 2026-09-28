@@ -157,7 +157,7 @@ jobs:
           cd slurmctld
           docker build --build-arg DEBIAN_SUITE=${SUITE}-slim --build-arg PYXIS_ENABLED=true \
             -t vulcan-slurm:slurmctld-px-dryrun . 2>&1 | tee /tmp/px-build.log || {
-            echo "::error::-px image build failed: $(tail -n8 /tmp/px-build.log | tr '\n' ' ' | cut -c1-300)"
+            echo "::error::-px image build failed: $(grep -vE '^ #[0-9]+ \[|^ *[0-9]+ \||^>>>|^ ---$|^ERROR: failed to solve:|^Dockerfile:' /tmp/px-build.log | tail -n10 | tr '\n' ' ' | cut -c1-900)"
             exit 1
           }
           # The image ENTRYPOINT starts slurmctld; override it to inspect files.
