@@ -84,7 +84,18 @@ jobs:
       - name: 🔨 Build Plugin
         run: |
           set -e
-          make -C /tmp/pyxis
+          # Surface the real failure via annotations: logs need auth, these don't.
+          if [ ! -f /usr/include/slurm/spank.h ]; then
+            echo "::error::spank.h missing — slurm-smd-dev did not install"
+            dpkg -l | grep slurm-smd || true
+            apt-get install -f -y || true
+            dpkg -l | grep slurm-smd || true
+            exit 1
+          fi
+          make -C /tmp/pyxis 2>&1 | tee /tmp/pyxis-build.log || {
+            echo "::error::pyxis build failed: $(grep -E 'error:|warning:|Error' /tmp/pyxis-build.log | tail -n5 | tr '\n' ' ')"
+            exit 1
+          }
           install -m 644 /tmp/pyxis/spank_pyxis.so /usr/lib/x86_64-linux-gnu/slurm/
 
       - name: 🧪 srun Plugin Load Test
