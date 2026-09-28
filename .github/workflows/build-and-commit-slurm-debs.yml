@@ -125,12 +125,19 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           apt-get update
-          echo "🔍 Checking available packages in Debian ${SUITE}..."
-          apt-cache policy devscripts equivs build-essential fakeroot debhelper curl jq git libpmix-dev libpmix2 libopenmpi-dev libopenmpi3 openmpi-bin libpam0g-dev
+          # Runtime library package names changed between suites (t64 transition):
+          # bullseye: libpmix2 / libopenmpi3   trixie: libpmix2t64 / libopenmpi40
+          if [ "$SUITE" = "bullseye" ]; then
+            PMIX_RT=libpmix2; OMPI_RT=libopenmpi3
+          else
+            PMIX_RT=libpmix2t64; OMPI_RT=libopenmpi40
+          fi
+          echo "🔍 Checking available packages in Debian ${SUITE} (runtime: $PMIX_RT, $OMPI_RT)..."
+          apt-cache policy devscripts equivs build-essential fakeroot debhelper curl jq git libpmix-dev "$PMIX_RT" libopenmpi-dev "$OMPI_RT" openmpi-bin libpam0g-dev
           echo "📦 Installing build dependencies..."
           apt-get install -y \
             devscripts equivs build-essential fakeroot debhelper curl jq git \
-            libpmix-dev libpmix2 libopenmpi-dev libopenmpi3 openmpi-bin \
+            libpmix-dev "$PMIX_RT" libopenmpi-dev "$OMPI_RT" openmpi-bin \
             libpam0g-dev
 
       - name: 📥 Download and Extract Slurm Source
