@@ -75,7 +75,7 @@ jobs:
       - name: 📦 Install Slurm DEBs (from repo)
         run: |
           set -e
-          apt-get install -y --no-install-recommends gcc make
+          apt-get install -y --no-install-recommends gcc make libc6-dev
           dpkg -i slurm-debs/slurm-smd_*_${SUITE}.deb \
                    slurm-debs/slurm-smd-client_*_${SUITE}.deb \
                    slurm-debs/slurm-smd-dev_*_${SUITE}.deb 2>/dev/null || true

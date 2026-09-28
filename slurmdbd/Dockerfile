@@ -129,11 +129,11 @@ RUN cd /tmp && \
 ARG PYXIS_ENABLED="false"
 COPY pyxis/ /build/pyxis/
 RUN if [ "$PYXIS_ENABLED" = "true" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends gcc make && \
+        apt-get update && apt-get install -y --no-install-recommends gcc make libc6-dev && \
         dpkg -i /tmp/slurm-smd-dev_*.deb && \
         make -C /build/pyxis && \
         install -m 644 /build/pyxis/spank_pyxis.so /usr/lib/x86_64-linux-gnu/slurm/ && \
-        apt-get purge -y gcc make && apt-get autoremove -y && \
+        apt-get purge -y gcc make libc6-dev && apt-get autoremove -y && \
         rm -rf /build /tmp/slurm-smd-dev_*.deb /var/lib/apt/lists/*; \
     else rm -rf /build/pyxis; fi
 
