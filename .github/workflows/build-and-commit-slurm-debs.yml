@@ -12,7 +12,7 @@ jobs:
   build-and-commit-debs:
     runs-on: ubuntu-22.04  # Host runner (required by GitHub Actions)
     container: 
-      image: debian:bullseye-slim
+      image: debian:trixie
       options: --user root  # Run as root for build process
 
     steps:
