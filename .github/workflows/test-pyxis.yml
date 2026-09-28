@@ -155,6 +155,13 @@ jobs:
         run: |
           cd slurmctld
           docker build --build-arg DEBIAN_SUITE=${SUITE}-slim --build-arg PYXIS_ENABLED=true \
-            -t vulcan-slurm:slurmctld-px-dryrun .
-          docker run --rm vulcan-slurm:slurmctld-px-dryrun \
-            ls -la /usr/lib/x86_64-linux-gnu/slurm/spank_pyxis.so
+            -t vulcan-slurm:slurmctld-px-dryrun . 2>&1 | tee /tmp/px-build.log || {
+            echo "::error::-px image build failed: $(grep -E '^E:|error|Error' /tmp/px-build.log | tail -n5 | tr '\n' ' ')"
+            exit 1
+          }
+          # The image ENTRYPOINT starts slurmctld; override it to inspect files.
+          docker run --rm --entrypoint ls vulcan-slurm:slurmctld-px-dryrun \
+            -la /usr/lib/x86_64-linux-gnu/slurm/spank_pyxis.so || {
+            echo "::error::spank_pyxis.so not present in the -px image"
+            exit 1
+          }
