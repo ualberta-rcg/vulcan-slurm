@@ -30,6 +30,18 @@ on:
           - trixie
           - bullseye
         default: trixie
+      PYXIS_ENABLED:
+        description: 'Build and include the pyxis SPANK plugin (images get an extra -px tag suffix).'
+        required: true
+        type: choice
+        options:
+          - '1' # True
+          - '0' # False
+        default: '0'
+      PYXIS_REF:
+        description: 'Optional: pyxis tag/branch/commit (e.g. v0.24.0). Leave empty for latest release tag.'
+        required: false
+        default: ''
   # Rebuild automatically when image sources change on main
   push:
     branches:
@@ -160,6 +172,7 @@ jobs:
       VERSION: ${{ needs.preflight.outputs.version }}
       DEB_VERSION: ${{ needs.preflight.outputs.deb_version }}
       SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
+      PYXIS: ${{ github.event.inputs.PYXIS_ENABLED || '0' }}
     steps:
       - name: 🛠️ Checkout Repository
         uses: actions/checkout@v4
@@ -173,19 +186,47 @@ jobs:
             -exec cp -v {} ./${{ matrix.service }}/ \;
           ls -lh ./${{ matrix.service }}/*.deb
 
+      - name: 📥 Stage pyxis source for ${{ matrix.service }}
+        run: |
+          # The Dockerfiles unconditionally COPY pyxis/, so the dir must exist
+          # in the context. When PYXIS is off it stays empty (no-op in the
+          # image). Ref resolution mirrors the Slurm version detection in the
+          # DEB workflow: PYXIS_REF input wins, else latest vX.Y.Z tag.
+          cd ./${{ matrix.service }}
+          mkdir -p pyxis
+          if [ "$PYXIS" = "1" ]; then
+            if [ -n "${{ github.event.inputs.PYXIS_REF }}" ]; then
+              REF="${{ github.event.inputs.PYXIS_REF }}"
+              echo "✅ Using manual pyxis ref override: $REF"
+            else
+              REF=$(curl -s https://api.github.com/repos/NVIDIA/pyxis/tags \
+                | jq -r '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+              [ -z "$REF" ] && { echo "❌ Could not determine latest pyxis tag."; exit 1; }
+              echo "🔬 Detected latest pyxis release: $REF"
+            fi
+            git clone --depth 1 --branch "$REF" https://github.com/NVIDIA/pyxis ./pyxis
+            rm -rf ./pyxis/.git
+            echo "pyxis ref: $REF" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: 🔑 Docker Hub Login
         run: |
           echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ vars.DOCKER_HUB_USER }}" --password-stdin
 
       - name: 🐳 Build and Push ${{ matrix.service }}
         run: |
-          echo "🔨 Building ${{ matrix.service }} (Debian ${SUITE})..."
+          TAGSUFFIX=""
+          [ "$PYXIS" = "1" ] && TAGSUFFIX="-px"
+          PYXISARG="false"; [ "$PYXIS" = "1" ] && PYXISARG="true"
+          echo "🔨 Building ${{ matrix.service }} (Debian ${SUITE}, pyxis=${PYXISARG})..."
           cd ${{ matrix.service }}
           docker build --build-arg DEBIAN_SUITE=${SUITE}-slim \
-            -t $DOCKER_REPO:${{ matrix.service }}-${SUITE} .
-          docker tag $DOCKER_REPO:${{ matrix.service }}-${SUITE} $DOCKER_REPO:${{ matrix.service }}-${SUITE}-$VERSION
-          docker push $DOCKER_REPO:${{ matrix.service }}-${SUITE}
-          docker push $DOCKER_REPO:${{ matrix.service }}-${SUITE}-$VERSION
+            --build-arg PYXIS_ENABLED=${PYXISARG} \
+            -t $DOCKER_REPO:${{ matrix.service }}-${SUITE}${TAGSUFFIX} .
+          docker tag $DOCKER_REPO:${{ matrix.service }}-${SUITE}${TAGSUFFIX} \
+            $DOCKER_REPO:${{ matrix.service }}-${SUITE}${TAGSUFFIX}-$VERSION
+          docker push $DOCKER_REPO:${{ matrix.service }}-${SUITE}${TAGSUFFIX}
+          docker push $DOCKER_REPO:${{ matrix.service }}-${SUITE}${TAGSUFFIX}-$VERSION
 
   verify:
     name: 🔍 Verify Pushed Tags
@@ -197,15 +238,18 @@ jobs:
       DOCKER_REPO: ${{ vars.DOCKER_HUB_REPO }}
       VERSION: ${{ needs.preflight.outputs.version }}
       SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
+      PYXIS: ${{ github.event.inputs.PYXIS_ENABLED || '0' }}
     steps:
       - name: 🔍 Inspect pushed tags and write summary
         run: |
-          echo "## Pushed images (Slurm ${VERSION}, Debian ${SUITE})" >> $GITHUB_STEP_SUMMARY
+          TAGSUFFIX=""
+          [ "$PYXIS" = "1" ] && TAGSUFFIX="-px"
+          echo "## Pushed images (Slurm ${VERSION}, Debian ${SUITE}${TAGSUFFIX})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Tag | Digest | Size |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|------|" >> $GITHUB_STEP_SUMMARY
           for svc in slurmctld slurmdbd slurmrestd; do
-            for tag in "$svc-$SUITE" "$svc-$SUITE-$VERSION"; do
+            for tag in "$svc-$SUITE$TAGSUFFIX" "$svc-$SUITE$TAGSUFFIX-$VERSION"; do
               # Fails the job if the tag does not exist on Docker Hub
               docker buildx imagetools inspect "$DOCKER_REPO:$tag" > /tmp/inspect.txt
               DIGEST=$(awk '/^Digest:/{print $2}' /tmp/inspect.txt)

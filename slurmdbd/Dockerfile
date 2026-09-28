@@ -119,6 +119,24 @@ RUN cd /tmp && \
         echo "No .deb packages to install."; \
     fi 
 
+
+# =============================================================================
+# OPTIONAL PYXIS SPANK PLUGIN (built only when PYXIS_ENABLED=true)
+# =============================================================================
+# The workflow stages a pyxis/ source dir into the build context (cloned from
+# NVIDIA/pyxis at the resolved ref). When disabled the dir is empty and this
+# is a no-op, leaving the image identical to a non-px build.
+ARG PYXIS_ENABLED="false"
+COPY pyxis/ /build/pyxis/
+RUN if [ "$PYXIS_ENABLED" = "true" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends gcc make && \
+        dpkg -i /tmp/slurm-smd-dev_*.deb && \
+        make -C /build/pyxis && \
+        install -m 644 /build/pyxis/spank_pyxis.so /usr/lib/x86_64-linux-gnu/slurm/ && \
+        apt-get purge -y gcc make && apt-get autoremove -y && \
+        rm -rf /build /tmp/slurm-smd-dev_*.deb /var/lib/apt/lists/*; \
+    else rm -rf /build/pyxis; fi
+
 COPY entrypoint.sh /entrypoint.sh
 
 # =============================================================================

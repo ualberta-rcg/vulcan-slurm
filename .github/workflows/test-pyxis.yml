@@ -1,0 +1,148 @@
+# =============================================================================
+# Pyxis SPANK Plugin Test
+# =============================================================================
+# Proves the pyxis plugin builds against the DEBs committed in slurm-debs/
+# and loads into the matching srun — before any -px image is published.
+#
+# Job 1: build the plugin on Debian trixie with the repo's own DEBs, then
+#        assert `srun --help` registers the --container-* options (a failed
+#        `required` SPANK plugin makes srun exit non-zero).
+# Job 2: dry-run the conditional -px Dockerfile stage (build only, no push).
+#
+# Pyxis ref resolution mirrors the Slurm version detection in
+# build-and-commit-slurm-debs.yml: the PYXIS_REF input wins; otherwise the
+# latest vX.Y.Z tag from the NVIDIA/pyxis tags API is used.
+# =============================================================================
+name: Test Pyxis Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      SUITE:
+        description: 'Debian suite of the DEBs to test against.'
+        required: true
+        type: choice
+        options:
+          - trixie
+          - bullseye
+        default: trixie
+      PYXIS_REF:
+        description: 'Optional: pyxis tag/branch/commit to test (e.g. v0.24.0). Leave empty for latest release tag.'
+        required: false
+        default: ''
+  push:
+    branches:
+      - main
+    paths:
+      - '*/Dockerfile'
+      - '.github/workflows/test-pyxis.yml'
+
+env:
+  SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
+
+jobs:
+  plugin-test:
+    name: 🧪 Build & Load Plugin (Debian ${{ github.event.inputs.SUITE || 'trixie' }})
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:${{ github.event.inputs.SUITE || 'trixie' }}-slim
+      options: --user root
+    steps:
+      - name: 🛠️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🎯 Resolve Pyxis Ref
+        id: pyxisref
+        run: |
+          set -e
+          apt-get update && apt-get install -y curl jq git
+          if [ -n "${{ github.event.inputs.PYXIS_REF }}" ]; then
+            REF="${{ github.event.inputs.PYXIS_REF }}"
+            echo "✅ Using manual pyxis ref override: $REF"
+          else
+            REF=$(curl -s https://api.github.com/repos/NVIDIA/pyxis/tags \
+              | jq -r '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+            [ -z "$REF" ] && { echo "❌ Could not determine latest pyxis tag."; exit 1; }
+            echo "🔬 Detected latest pyxis release: $REF"
+          fi
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+
+      - name: 📥 Clone Pyxis
+        run: |
+          git clone --depth 1 --branch "${{ steps.pyxisref.outputs.ref }}" \
+            https://github.com/NVIDIA/pyxis /tmp/pyxis
+
+      - name: 📦 Install Slurm DEBs (from repo)
+        run: |
+          set -e
+          apt-get install -y --no-install-recommends gcc make
+          dpkg -i slurm-debs/slurm-smd_*_${SUITE}.deb \
+                   slurm-debs/slurm-smd-client_*_${SUITE}.deb \
+                   slurm-debs/slurm-smd-dev_*_${SUITE}.deb 2>/dev/null || true
+          apt-get install -f -y
+
+      - name: 🔨 Build Plugin
+        run: |
+          set -e
+          make -C /tmp/pyxis
+          install -m 644 /tmp/pyxis/spank_pyxis.so /usr/lib/x86_64-linux-gnu/slurm/
+
+      - name: 🧪 srun Plugin Load Test
+        run: |
+          set -e
+          mkdir -p /etc/slurm/plugstack.d
+          echo "required /usr/lib/x86_64-linux-gnu/slurm/spank_pyxis.so" \
+            > /etc/slurm/plugstack.d/pyxis.conf
+          cat > /etc/slurm/slurm.conf <<EOF
+          ClusterName=pyxistest
+          SlurmctldHost=localhost(127.0.0.1)
+          PlugStackConfig=/etc/slurm/plugstack.conf
+          EOF
+          echo "include /etc/slurm/plugstack.d/*" > /etc/slurm/plugstack.conf
+          COUNT=$(srun --help 2>&1 | grep -c -- '--container' || true)
+          echo "srun registered $COUNT --container-* options"
+          srun --help 2>&1 | grep -m3 -- '--container' || true
+          [ "$COUNT" -ge 1 ] || { echo "❌ pyxis options not registered"; exit 1; }
+          echo "✅ spank_pyxis.so loads and registers with srun"
+
+  docker-dryrun:
+    name: 🐳 Dry-run -px Image Build
+    runs-on: ubuntu-24.04
+    needs: plugin-test
+    steps:
+      - name: 🛠️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🎯 Resolve Pyxis Ref
+        id: pyxisref
+        run: |
+          set -e
+          if [ -n "${{ github.event.inputs.PYXIS_REF }}" ]; then
+            REF="${{ github.event.inputs.PYXIS_REF }}"
+          else
+            REF=$(curl -s https://api.github.com/repos/NVIDIA/pyxis/tags \
+              | jq -r '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          fi
+          [ -z "$REF" ] && { echo "❌ Could not determine pyxis ref."; exit 1; }
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+
+      - name: 📦 Stage Context (DEBs + pyxis) for slurmctld
+        run: |
+          set -e
+          SUITE="${{ env.SUITE }}"
+          DEB_VERSION=$(find slurm-debs -maxdepth 1 -name "slurm-smd_*_amd64_${SUITE}.deb" \
+            | sed -E "s/.*slurm-smd_([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)_amd64_${SUITE}\.deb/\1/" \
+            | sort -V | tail -n1)
+          [ -z "$DEB_VERSION" ] && { echo "❌ No DEBs for suite $SUITE"; exit 1; }
+          find slurm-debs -maxdepth 1 -name "*_${DEB_VERSION}_*_${SUITE}.deb" ! -name "*dbgsym*" \
+            -exec cp -v {} ./slurmctld/ \;
+          git clone --depth 1 --branch "${{ steps.pyxisref.outputs.ref }}" \
+            https://github.com/NVIDIA/pyxis ./slurmctld/pyxis
+
+      - name: 🐳 Build -px Image (no push)
+        run: |
+          cd slurmctld
+          docker build --build-arg DEBIAN_SUITE=${SUITE}-slim --build-arg PYXIS_ENABLED=true \
+            -t vulcan-slurm:slurmctld-px-dryrun .
+          docker run --rm vulcan-slurm:slurmctld-px-dryrun \
+            ls -la /usr/lib/x86_64-linux-gnu/slurm/spank_pyxis.so
