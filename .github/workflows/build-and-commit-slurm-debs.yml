@@ -1,6 +1,12 @@
 name: Build and Commit Slurm DEB Packages
 
 on:
+  # Editing this workflow itself triggers a build of the latest DEBs
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-and-commit-slurm-debs.yml'
   workflow_dispatch:
     inputs:
       SLURM_VERSION_OVERRIDE:
