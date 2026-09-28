@@ -16,7 +16,7 @@
 # =============================================================================
 
 # Base image
-FROM debian:bullseye-slim
+FROM debian:trixie
 
 # =============================================================================
 # ENVIRONMENT VARIABLES - Standardized across all Slurm services
