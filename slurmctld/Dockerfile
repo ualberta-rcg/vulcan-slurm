@@ -16,7 +16,7 @@
 # =============================================================================
 
 # Base image
-FROM debian:trixie
+FROM debian:trixie-slim
 
 # =============================================================================
 # ENVIRONMENT VARIABLES - Standardized across all Slurm services
