@@ -184,7 +184,7 @@ RUN if [ "$PYXIS_ENABLED" = "true" ]; then \
         make -C /build/pyxis && \
         install -m 644 /build/pyxis/spank_pyxis.so /usr/lib/x86_64-linux-gnu/slurm/ && \
         apt-get purge -y gcc make libc6-dev && apt-get autoremove -y && \
-        rm -rf /build /tmp/slurm-smd-dev_*.deb /var/lib/apt/lists/*; \
+        rm -rf /build /tmp/slurm-smd-dev_*.deb; \
     else rm -rf /build/pyxis; fi
 
 COPY entrypoint.sh /entrypoint.sh
