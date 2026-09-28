@@ -22,6 +22,14 @@ on:
         description: 'Optional: Specific Slurm version to build (e.g., 24-11-5-1). Leave empty to use latest.'
         required: false
         default: ''
+      SUITE:
+        description: 'Debian suite of the DEBs to install and base image to build (sets the Docker Hub tag suffix).'
+        required: true
+        type: choice
+        options:
+          - trixie
+          - bullseye
+        default: trixie
   # Rebuild automatically when image sources change on main
   push:
     branches:
@@ -30,7 +38,15 @@ on:
       - 'slurmctld/**'
       - 'slurmdbd/**'
       - 'slurmrestd/**'
+      - 'slurm-debs/**'
       - '.github/workflows/build-push-workflow.yml'
+
+# Suite selection: dispatch input wins; push/schedule events default to trixie.
+# The suite picks which DEBs are staged (filename suffix), the base image
+# (--build-arg), and the Docker Hub tag names, so per-suite tags never
+# overwrite each other.
+env:
+  SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
 
 # A newer run supersedes an older one for the same ref
 concurrency:
@@ -80,12 +96,20 @@ jobs:
             # has DEBs for, and this keeps push-triggered rebuilds
             # deterministic (a brand-new upstream tag without DEBs would
             # otherwise skip the build).
-            LATEST_DEB=$(find slurm-debs -maxdepth 1 -name 'slurm-smd_*_amd64.deb' \
-            | sed -E 's/.*slurm-smd_([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)_amd64\.deb/\1/' \
+            LATEST_DEB=$(find slurm-debs -maxdepth 1 -name "slurm-smd_*_amd64_${SUITE}.deb" \
+            | sed -E "s/.*slurm-smd_([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)_amd64_${SUITE}\.deb/\1/" \
             | sort -V \
             | tail -n1)
 
             if [ -z "$LATEST_DEB" ]; then
+              ANY_DEB=$(find slurm-debs -maxdepth 1 -name 'slurm-smd_*_amd64*.deb' | wc -l || true)
+              if [ "$ANY_DEB" -gt 0 ]; then
+                echo "🚫 No slurm-smd DEBs for suite '${SUITE}' yet (other suites exist)."
+                echo "skip_build=true" >> $GITHUB_OUTPUT
+                echo "version=none" >> $GITHUB_OUTPUT
+                echo "deb_version=none" >> $GITHUB_OUTPUT
+                exit 0
+              fi
               echo "❌ Could not find any slurm-smd DEBs in slurm-debs/."
               exit 1
             fi
@@ -110,11 +134,12 @@ jobs:
           echo "🔍 Inputs:"
           echo "  Raw version       = $version"
           echo "  Debian version    = $debver"
-          echo "  Search pattern    = *_${debver}_*.deb"
+          echo "  Suite             = $SUITE"
+          echo "  Search pattern    = *_${debver}_*_${SUITE}.deb"
 
           # Check for existing DEBs in the slurm-debs directory
           if [ -d "slurm-debs" ]; then
-            count=$(find "slurm-debs" -type f -name "*_${debver}_*.deb" | wc -l || true)
+            count=$(find "slurm-debs" -type f -name "*_${debver}_*_${SUITE}.deb" | wc -l || true)
             if [ "$count" -gt 0 ]; then
               echo "✅ DEBs for Slurm $version found. Proceeding with Docker build."
               echo "skip_build=false" >> $GITHUB_OUTPUT
@@ -154,10 +179,10 @@ jobs:
 
       - name: 📦 Stage DEB files for ${{ matrix.service }}
         run: |
-          # Copy only the version-matched, non-debug DEBs into the build
-          # context. (The Dockerfiles also exclude dbgsym as a second line of
-          # defense.)
-          find slurm-debs -maxdepth 1 -name "*_${DEB_VERSION}_*.deb" ! -name "*dbgsym*" \
+          # Copy only the version- and suite-matched, non-debug DEBs into the
+          # build context. (The Dockerfiles also exclude dbgsym as a second
+          # line of defense.)
+          find slurm-debs -maxdepth 1 -name "*_${DEB_VERSION}_*_${SUITE}.deb" ! -name "*dbgsym*" \
             -exec cp -v {} ./${{ matrix.service }}/ \;
           ls -lh ./${{ matrix.service }}/*.deb
 
@@ -167,12 +192,13 @@ jobs:
 
       - name: 🐳 Build and Push ${{ matrix.service }}
         run: |
-          echo "🔨 Building ${{ matrix.service }}..."
+          echo "🔨 Building ${{ matrix.service }} (Debian ${SUITE})..."
           cd ${{ matrix.service }}
-          docker build -t $DOCKER_REPO:${{ matrix.service }} .
-          docker tag $DOCKER_REPO:${{ matrix.service }} $DOCKER_REPO:${{ matrix.service }}-$VERSION
-          docker push $DOCKER_REPO:${{ matrix.service }}
-          docker push $DOCKER_REPO:${{ matrix.service }}-$VERSION
+          docker build --build-arg DEBIAN_SUITE=${SUITE}-slim \
+            -t $DOCKER_REPO:${{ matrix.service }}-${SUITE} .
+          docker tag $DOCKER_REPO:${{ matrix.service }}-${SUITE} $DOCKER_REPO:${{ matrix.service }}-${SUITE}-$VERSION
+          docker push $DOCKER_REPO:${{ matrix.service }}-${SUITE}
+          docker push $DOCKER_REPO:${{ matrix.service }}-${SUITE}-$VERSION
 
   verify:
     name: 🔍 Verify Pushed Tags
@@ -186,12 +212,12 @@ jobs:
     steps:
       - name: 🔍 Inspect pushed tags and write summary
         run: |
-          echo "## Pushed images (Slurm ${VERSION})" >> $GITHUB_STEP_SUMMARY
+          echo "## Pushed images (Slurm ${VERSION}, Debian ${SUITE})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Tag | Digest | Size |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|------|" >> $GITHUB_STEP_SUMMARY
           for svc in slurmctld slurmdbd slurmrestd; do
-            for tag in "$svc" "$svc-$VERSION"; do
+            for tag in "$svc-$SUITE" "$svc-$SUITE-$VERSION"; do
               # Fails the job if the tag does not exist on Docker Hub
               docker buildx imagetools inspect "$DOCKER_REPO:$tag" > /tmp/inspect.txt
               DIGEST=$(awk '/^Digest:/{print $2}' /tmp/inspect.txt)

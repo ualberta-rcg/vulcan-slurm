@@ -7,13 +7,23 @@ on:
         description: 'Optional: Specific Slurm version to build (e.g., 24-11-5-1). Leave empty to use latest.'
         required: false
         default: ''
+      SUITE:
+        description: 'Debian suite to build DEBs on (stamps filename suffix and Docker Hub tags).'
+        required: true
+        type: choice
+        options:
+          - trixie
+          - bullseye
+        default: trixie
 
 jobs:
   build-and-commit-debs:
     runs-on: ubuntu-22.04  # Host runner (required by GitHub Actions)
-    container: 
-      image: debian:trixie-slim
+    container:
+      image: debian:${{ github.event.inputs.SUITE || 'trixie' }}-slim
       options: --user root  # Run as root for build process
+    env:
+      SUITE: ${{ github.event.inputs.SUITE || 'trixie' }}
 
     steps:
       - name: 🐛 Debug Information
@@ -82,14 +92,17 @@ jobs:
           echo "🔍 Inputs:"
           echo "  Raw version       = $version"
           echo "  Debian version    = $debver"
-          echo "  Search pattern    = *_${debver}_*.deb"
+          echo "  Suite             = $SUITE"
+          echo "  Search pattern    = *_${debver}_*_${SUITE}.deb"
 
           # Clone the repo to check for existing DEBs
           git clone https://github.com/${{ github.repository }}.git /tmp/repo
           cd /tmp/repo
-          
+
           if [ -d "slurm-debs" ]; then
-            count=$(find "slurm-debs" -type f -name "*_${debver}_*.deb" | wc -l || true)
+            # Only match DEBs built for this suite (suffix _${SUITE}); DEBs for
+            # other suites must not trigger the "already exist" skip.
+            count=$(find "slurm-debs" -type f -name "*_${debver}_*_${SUITE}.deb" | wc -l || true)
             if [ "$count" -gt 0 ]; then
               echo "✅ DEBs for Slurm $version already exist. Skipping build."
               echo "skip_build=true" >> $GITHUB_OUTPUT
@@ -106,7 +119,7 @@ jobs:
         if: steps.version-check.outputs.skip_build == 'false'
         run: |
           apt-get update
-          echo "🔍 Checking available packages in Debian Bullseye..."
+          echo "🔍 Checking available packages in Debian ${SUITE}..."
           apt-cache policy devscripts equivs build-essential fakeroot debhelper curl jq git libpmix-dev libpmix2 libopenmpi-dev libopenmpi3 openmpi-bin libpam0g-dev
           echo "📦 Installing build dependencies..."
           apt-get install -y \
@@ -175,11 +188,14 @@ jobs:
           DEST_DIR="/tmp/repo/slurm-debs"
           mkdir -p "$DEST_DIR"
           
-          # Move all .deb files from the parent directory without renaming
-          # The packages already have proper names from debuild (including architecture)
+          # Move all .deb files from the parent directory, suffixing each with
+          # the suite it was built on (e.g. slurm-smd_26.05.4-1_amd64_trixie.deb)
+          # so DEBs for different suites coexist in slurm-debs/ and the
+          # skip-check / image-build selection can tell them apart.
           for deb in /tmp/slurm/*.deb; do
             if [ -f "$deb" ]; then
-              mv "$deb" "$DEST_DIR/"
+              base=$(basename "$deb" .deb)
+              mv "$deb" "$DEST_DIR/${base}_${SUITE}.deb"
             fi
           done
           echo "Moved DEBs to $DEST_DIR"
@@ -204,6 +220,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Debian"
+            git commit -m "Add Slurm DEBs (v${{ steps.vars.outputs.version }}) for Debian ${SUITE}"
             git push origin HEAD:${{ github.ref_name }}
           fi
